@@ -1,0 +1,17 @@
+[package]
+name = "usbd-dfu"
+description = "DFU protocol for a `usb-device device."
+version = "0.1.0"
+authors = ["Vitalii Bursov <vitaly@bursov.com>"]
+edition = "2018"
+readme = "README.md"
+license = "MIT"
+keywords = ["no-std", "usb-device", "dfu"]
+repository = "https://github.com/vitalyvb/usbd-dfu"
+
+[dependencies.usb-device]
+version = "0.2.8"
+
+[dev-dependencies.stm32f1xx-hal]
+version = "0.7.0"
+features = ["rt", "stm32f103", "medium", "stm32-usbd"]
