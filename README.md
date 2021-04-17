@@ -1,5 +1,7 @@
 # usbd-dfu
 
+[![Crates.io](https://img.shields.io/crates/v/usbd-dfu.svg)](https://crates.io/crates/usbd-dfu) [![Docs.rs](https://docs.rs/usbd-dfu/badge.svg)](https://docs.rs/usbd-dfu)
+
 Implements DFU protocol version 1.1a for a `usb-device` device.
 
 ## About
