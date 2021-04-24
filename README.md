@@ -141,3 +141,6 @@ let mut dfu = DFUClass::new(&usb_bus_alloc, my_mem);
 usb_dev.poll(&mut [&mut dfu]);
 ```
 
+### Example bootloader implementation
+
+See [usbd-dfu-example](https://github.com/vitalyvb/usbd-dfu-example) for a functioning example.
