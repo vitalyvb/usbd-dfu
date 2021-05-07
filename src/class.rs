@@ -510,7 +510,7 @@ impl<B: UsbBus, M: DFUMemIO> UsbClass<B> for DFUClass<B, M> {
 
     // Handle control requests to the host.
     fn control_in(&mut self, xfer: ControlIn<B>) {
-        let req = xfer.request().clone();
+        let req = *xfer.request();
 
         if req.request_type != control::RequestType::Class {
             return;
@@ -534,7 +534,7 @@ impl<B: UsbBus, M: DFUMemIO> UsbClass<B> for DFUClass<B, M> {
 
     // Handle a control request from the host.
     fn control_out(&mut self, xfer: ControlOut<B>) {
-        let req = xfer.request().clone();
+        let req = *xfer.request();
 
         if req.request_type != control::RequestType::Class {
             return;
@@ -676,7 +676,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
 
         if req.value > 1 {
             let data = xfer.data();
-            if data.len() > 0 {
+            if !data.is_empty() {
                 // store the whole buffer, chunked operation in not supported
                 match self.mem.store_write_buffer(data) {
                     Err(_) => {
@@ -692,8 +692,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                 }
                 return;
             }
-        } else
-        if req.value == 0 {
+        } else if req.value == 0 {
             let data = xfer.data();
             if req.length >= 1 {
                 let command = data[0];
@@ -710,8 +709,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                         xfer.accept().ok();
                         return;
                     }
-                } else
-                if command == DnloadCommand::Erase as u8 {
+                } else if command == DnloadCommand::Erase as u8 {
                     if req.length == 5 {
                         let addr =
                             (data[1] as u32) |
@@ -722,15 +720,13 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                         self.status.new_state_ok(DFUState::DfuDnloadSync);
                         xfer.accept().ok();
                         return;
-                    } else
-                    if req.length == 1 {
+                    } else if req.length == 1 {
                         self.status.command = Command::EraseAll;
                         self.status.new_state_ok(DFUState::DfuDnloadSync);
                         xfer.accept().ok();
                         return;
                     }
-                } else
-                if HAS_READ_UNPROTECT && command == DnloadCommand::ReadUnprotect as u8 {
+                } else if HAS_READ_UNPROTECT && command == DnloadCommand::ReadUnprotect as u8 {
                     self.status.command = Command::ReadUnprotect;
                     self.status.new_state_ok(DFUState::DfuDnloadSync);
                     xfer.accept().ok();
@@ -767,8 +763,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                 xfer.accept_with(&commands).ok();
                 return;
             }
-        } else
-        if req.value > 1 {
+        } else if req.value > 1 {
             // upload command
             let block_num = req.value - 2;
             let transfer_size = min(M::TRANSFER_SIZE, req.length);
@@ -953,8 +948,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                     self.status.new_state_ok(DFUState::DfuDnloadIdle);
                 }
             }
-        } else
-        if initial_state == DFUState::DfuManifestSync {
+        } else if initial_state == DFUState::DfuManifestSync {
             match self.status.command {
                 Command::None => {
                     if M::MANIFESTATION_TOLERANT {
@@ -970,8 +964,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                     self.status.new_state_ok(DFUState::DfuManifest);
                 }
             }
-        } else
-        if initial_state == DFUState::DfuDnBusy {
+        } else if initial_state == DFUState::DfuDnBusy {
             return false;
         }
 

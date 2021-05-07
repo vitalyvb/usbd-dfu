@@ -5,7 +5,7 @@ use usb_device::bus::PollResult;
 use usb_device::class::UsbClass;
 use usb_device::bus::{UsbBusAllocator, UsbBus};
 use usb_device::endpoint::{EndpointAddress,EndpointType};
-use usb_device::{UsbDirection,UsbError,Result};
+use usb_device::{UsbDirection,Result};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum EPErr {
@@ -52,9 +52,7 @@ impl EP {
         let res = self.write_len;
         dbg!("g",self.write_len);
         self.write_len = 0;
-        for i in 0..res {
-            data[i] = self.write[i];
-        }
+        data[..res].clone_from_slice(&self.write[..res]);
         self.write_done = true;
         res
     }
@@ -138,15 +136,14 @@ impl usb_device::bus::UsbBus for TestBus {
         if let Some(ea) = ep_addr {
             let io = self.io().borrow();
             let mut sep = io.epidx(ea).borrow_mut();
-            assert_eq!(sep.alloc, false);
+            assert!(!sep.alloc);
             sep.alloc = true;
             sep.stall = false;
 
             Ok(ea)
 
         } else {
-            assert!(false);
-            Err(UsbError::EndpointOverflow)
+            panic!("ep_addr is required, endpoint allocation is not implemented");
         }
     }
     fn enable(&mut self) {}
@@ -192,9 +189,7 @@ impl usb_device::bus::UsbBus for TestBus {
             //return (Err(UsbError::WouldBlock))
         }
 
-        for i in 0..len {
-            buf[i] = ep.read[i];
-        }
+        buf[..len].clone_from_slice(&ep.read[..len]);
 
         ep.read_len -= len;
         ep.read.copy_within(len.., 0);

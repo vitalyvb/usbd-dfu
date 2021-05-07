@@ -173,8 +173,7 @@ impl DFUMemIO for TestMem {
         if self.overrides.manifestation.is_some() {
             return self.overrides.manifestation.unwrap()(self);
         }
-        assert!(false, "device reset");
-        Ok(())
+        panic!("emulate device reset");
     }
 }
 
@@ -704,7 +703,7 @@ fn test_block_erase_and_program() {
 }
 
 #[test]
-#[should_panic(expected = "device reset")]
+#[should_panic(expected = "emulate device reset")]
 fn test_manifestation() {
     with_usb(&mut MkDFU{}, |mut dfu, transact| {
         let mut buf = [0u8;256];
@@ -739,12 +738,7 @@ fn test_manifestation() {
         assert_eq!(len, 6);
         assert_eq!(&buf[0..6], &[0,1,0,0,7,0]); // dfuManifest
 
-        assert!(false, "must reset");
-
-        /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0,0, 0,0, 6,0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0,0,0,0,8,0]); // DfuManifestWaitReset
+        unreachable!("device must reset");
     });
 }
 

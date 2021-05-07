@@ -32,7 +32,7 @@ impl DFUMemIO for TestMem {
     // const MEMIO_IN_USB_INTERRUPT: bool = false;
 
     fn read_block(&mut self, address: u32, length: usize) -> core::result::Result<&[u8], DFUMemError> {
-        return Err(DFUMemError::Address);
+        Err(DFUMemError::Address)
     }
 
     fn erase_block(&mut self, address: u32) -> core::result::Result<(), DFUMemError> {
