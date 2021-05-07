@@ -30,7 +30,7 @@ jobs:
   #     - uses: actions-rs/cargo@v1
   #       with:
   #         command: clippy
-  #         args: -- -W clippy::all
+  #         args: -- -W clippy::eq_op
 
   build_only:
     runs-on: ubuntu-latest
@@ -86,23 +86,23 @@ jobs:
         with:
           command: test
 
-  # docs:
-  #   runs-on: ubuntu-latest
-  #   strategy:
-  #     matrix:
-  #       rust:
-  #         - stable
-  #         - nightly
+  docs:
+    needs: [build_only]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
 
-  #   steps:
-  #     - uses: actions/checkout@v2
+    steps:
+      - uses: actions/checkout@v2
 
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: ${{ matrix.rust }}
-  #         override: true
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
 
-  #     - uses: actions-rs/cargo@v1
-  #       with:
-  #         command: doc
+      - uses: actions-rs/cargo@v1
+        with:
+          command: doc
