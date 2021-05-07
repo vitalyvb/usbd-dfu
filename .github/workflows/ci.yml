@@ -4,42 +4,10 @@ name: Continuous integration
 
 jobs:
 
-  lints:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust:
-          - stable
-          - nightly
-
-    steps:
-      - uses: actions/checkout@v2
-
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
-          components: rustfmt, clippy
-
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
-
-      - uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -W clippy::all
-
-  # build:
+  # lints:
   #   runs-on: ubuntu-latest
   #   strategy:
   #     matrix:
-  #       target:
-  #         - x86_64-unknown-linux-gnu
-  #         - i686-unknown-linux-gnu
-  #         - thumbv7m-none-eabi
   #       rust:
   #         - stable
   #         - nightly
@@ -51,12 +19,44 @@ jobs:
   #       with:
   #         profile: minimal
   #         toolchain: ${{ matrix.rust }}
-  #         target: ${{ matrix.target }}
   #         override: true
+  #         components: rustfmt, clippy
 
   #     - uses: actions-rs/cargo@v1
   #       with:
-  #         command: build
+  #         command: fmt
+  #         args: --all -- --check
+
+  #     - uses: actions-rs/cargo@v1
+  #       with:
+  #         command: clippy
+  #         args: -- -W clippy::all
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - i686-unknown-linux-gnu
+          - thumbv7m-none-eabi
+        rust:
+          - stable
+          - nightly
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          override: true
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
 
   # tests:
   #   runs-on: ubuntu-latest
