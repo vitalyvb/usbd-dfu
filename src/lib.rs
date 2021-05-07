@@ -12,7 +12,7 @@
 //! mode.
 //!
 //! Protocol implementation tries to follows DFU 1.1a protocol as
-//! specified by AN3156 by STMicroelectronics and 
+//! specified by AN3156 by STMicroelectronics and
 //! USB Device Firmware Upgrade Specification, Revision 1.1.
 //!
 //! This library is a protocol implementation only, actual code
@@ -71,11 +71,11 @@
 //! #
 //! # let usb_bus_alloc: UsbBusAllocator<UsbBus<Peripheral>> = unsafe { core::mem::MaybeUninit::<UsbBusAllocator<UsbBus<Peripheral>>>::uninit().assume_init() };
 //! # let mut usb_dev = UsbDeviceBuilder::new(&usb_bus_alloc, UsbVidPid(0, 0)).build();
-//! 
+//!
 //! // DFUClass will use MyMem to actually read, erase or program the memory.
 //! // Here, a set of constant parameters must be set. These parameters
 //! // either change how DFUClass behaves, or define host's expectations.
-//! 
+//!
 //! struct MyMem {
 //!     buffer: [u8; 64],
 //!     flash_memory: [u8; 1024],
@@ -88,30 +88,30 @@
 //!     const PAGE_ERASE_TIME_MS : u32 = 50;
 //!     const FULL_ERASE_TIME_MS : u32 = 50;
 //!     const TRANSFER_SIZE: u16 = 64;
-//! 
+//!
 //!     fn read_block(&mut self, address: u32, length: usize) -> Result<&[u8], DFUMemError> {
 //!         // TODO: check address value
 //!         let offset = address as usize;
 //!         Ok(&self.flash_memory[offset..offset+length])
 //!     }
-//! 
+//!
 //!     fn erase_block(&mut self, address: u32) -> Result<(), DFUMemError> {
 //!         // TODO: check address value
 //!         self.flash_memory.fill(0xff);
 //!         // TODO: verify that block is erased successfully
 //!         Ok(())
 //!     }
-//! 
+//!
 //!     fn erase_all_blocks(&mut self) -> Result<(), DFUMemError> {
 //!         // There is only one block, erase it.
 //!         self.erase_block(0)
 //!     }
-//! 
+//!
 //!     fn store_write_buffer(&mut self, src:&[u8]) -> Result<(), ()>{
 //!         self.buffer[..src.len()].copy_from_slice(src);
 //!         Ok(())
 //!     }
-//! 
+//!
 //!     fn program_block(&mut self, address: u32, length: usize) -> Result<(), DFUMemError>{
 //!         // TODO: check address value
 //!         let offset = address as usize;
@@ -122,7 +122,7 @@
 //!         // TODO: verify that memory is programmed correctly
 //!         Ok(())
 //!     }
-//! 
+//!
 //!     fn manifestation(&mut self) -> Result<(), DFUManifestationError> {
 //!         // Nothing to do to activate FW
 //!         Ok(())
@@ -133,7 +133,7 @@
 //!     buffer: [0u8; 64],
 //!     flash_memory: [0u8; 1024],
 //! };
-//! 
+//!
 //! // Create USB device for a target device:
 //! // let usb_bus_alloc = UsbBus::new(peripheral);
 //! // let usb_dev = UsbDeviceBuilder::new().build();
@@ -150,9 +150,4 @@
 pub mod class;
 
 #[doc(inline)]
-pub use crate::class::{
-    DFUClass,
-    DFUMemIO,
-    DFUManifestationError,
-    DFUMemError,
-};
+pub use crate::class::{DFUClass, DFUManifestationError, DFUMemError, DFUMemIO};
