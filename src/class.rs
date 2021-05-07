@@ -477,7 +477,6 @@ impl<B: UsbBus, M: DFUMemIO> UsbClass<B> for DFUClass<B, M> {
                 // Bit 7: bitAcceleratedST
                 (if false {0x80} else {0}) |
                     // Bit 4-6: Reserved
-                    0 |
                     // Bit 3: bitWillDetach
                     (if true {0x8} else {0}) |
                     // Bit 2: bitManifestationTolerant
