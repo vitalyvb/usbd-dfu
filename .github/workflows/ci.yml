@@ -32,13 +32,11 @@ jobs:
   #         command: clippy
   #         args: -- -W clippy::all
 
-  build:
+  build_only:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         target:
-          - x86_64-unknown-linux-gnu
-          - i686-unknown-linux-gnu
           - thumbv7m-none-eabi
         rust:
           - stable
@@ -58,30 +56,35 @@ jobs:
         with:
           command: build
 
-  # tests:
-  #   runs-on: ubuntu-latest
-  #   strategy:
-  #     matrix:
-  #       target:
-  #         - x86_64-unknown-linux-gnu
-  #         - i686-unknown-linux-gnu
-  #       rust:
-  #         - stable
-  #         - nightly
+  tests:
+    needs: [build_only]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - i686-unknown-linux-gnu
+        rust:
+          - stable
+          - nightly
 
-  #   steps:
-  #     - uses: actions/checkout@v2
+    steps:
+      - uses: actions/checkout@v2
 
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: ${{ matrix.rust }}
-  #         target: ${{ matrix.target }}
-  #         override: true
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          override: true
 
-  #     - uses: actions-rs/cargo@v1
-  #       with:
-  #         command: test
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
 
   # docs:
   #   runs-on: ubuntu-latest
