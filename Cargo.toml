@@ -15,3 +15,6 @@ version = "0.2.8"
 [dev-dependencies.stm32f1xx-hal]
 version = "0.7.0"
 features = ["rt", "stm32f103", "medium", "stm32-usbd"]
+
+[patch.crates-io]
+usb-device = { path = 'vendor/usb-device' }
