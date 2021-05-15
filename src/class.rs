@@ -376,8 +376,8 @@ impl From<DFUManifestationError> for DFUStatusCode {
             DFUManifestationError::Firmware => DFUStatusCode::ErrFirmware,
             DFUManifestationError::Unknown => DFUStatusCode::ErrUnknown,
             DFUManifestationError::ErrVendor => DFUStatusCode::ErrVendor,
-            DFUManifestationError::File => DFUStatusCode::ErrTarget,
-            DFUManifestationError::Target => DFUStatusCode::ErrFile,
+            DFUManifestationError::File => DFUStatusCode::ErrFile,
+            DFUManifestationError::Target => DFUStatusCode::ErrTarget,
         }
     }
 }
