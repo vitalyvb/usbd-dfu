@@ -23,6 +23,7 @@ struct EP {
     write: [u8; 1024],
     write_done: bool,
     setup: bool,
+    max_size: usize,
 }
 impl EP {
     fn new() -> Self {
@@ -36,6 +37,7 @@ impl EP {
             write: [0; 1024],
             write_done: false,
             setup: false,
+            max_size: 0,
         }
     }
 
@@ -144,7 +146,7 @@ impl usb_device::bus::UsbBus for TestBus {
         _ep_dir: UsbDirection,
         ep_addr: Option<EndpointAddress>,
         _ep_type: EndpointType,
-        _max_packet_size: u16,
+        max_packet_size: u16,
         _interval: u8,
     ) -> Result<EndpointAddress> {
         if let Some(ea) = ep_addr {
@@ -153,6 +155,7 @@ impl usb_device::bus::UsbBus for TestBus {
             assert!(!sep.alloc);
             sep.alloc = true;
             sep.stall = false;
+            sep.max_size = max_packet_size as usize;
 
             Ok(ea)
         } else {
@@ -193,12 +196,12 @@ impl usb_device::bus::UsbBus for TestBus {
     fn read(&self, ep_addr: EndpointAddress, buf: &mut [u8]) -> Result<usize> {
         let io = self.io().borrow();
         let mut ep = io.epidx(ep_addr).borrow_mut();
-        let len = min(buf.len(), ep.read_len);
+        let len = min(buf.len(), min(ep.read_len, ep.max_size));
 
-        dbg!("read len from", buf.len(), ep.read_len, ep_addr);
+        dbg!("read len from", buf.len(), len, ep_addr);
 
         if len == 0 {
-            //return (Err(UsbError::WouldBlock))
+            return Err(UsbError::WouldBlock);
         }
 
         buf[..len].clone_from_slice(&ep.read[..len]);
@@ -237,6 +240,10 @@ impl usb_device::bus::UsbBus for TestBus {
         let mut len = 0;
 
         dbg!("write", buf.len());
+
+        if buf.len() > ep.max_size {
+            return Err(UsbError::BufferOverflow);
+        }
 
         for (i, e) in ep.write[offset..].iter_mut().enumerate() {
             if i >= buf.len() {
@@ -318,8 +325,16 @@ pub fn with_usb<T, M>(
 
         if let Some(val) = data {
             usb.borrow().set_read(out0, val, false);
-            dev.poll(&mut [d]);
-            maker.poll(d);
+            for i in 1..100 {
+                let res = dev.poll(&mut [d]);
+                maker.poll(d);
+                if !res {
+                    break;
+                }
+                if i >= 99 {
+                    panic!("read too much");
+                }
+            }
             if usb.borrow().stalled0() {
                 return Err(EPErr::Stalled);
             }
