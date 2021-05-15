@@ -1,5 +1,5 @@
-use crate::bus::{PollResult, StringIndex, UsbBus, UsbBusAllocator};
-use crate::class::{ControlIn, ControlOut, UsbClass};
+use crate::{bus::{PollResult, StringIndex, UsbBus, UsbBusAllocator}, control::Request};
+use crate::class::{ControlIn, ControlOut, UsbClass, ControlInChunked};
 use crate::control;
 use crate::control_pipe::ControlPipe;
 use crate::descriptor::{descriptor_type, lang_id, BosWriter, DescriptorWriter};
@@ -191,6 +191,17 @@ impl<B: UsbBus> UsbDevice<'_, B> {
                     // phase of the control transfer. We have to process EP0-IN first to update our
                     // internal state properly.
                     if (ep_in_complete & 1) != 0 {
+
+                        if let Some(req) = self.control.chunked_req() {
+                            for cls in classes.iter_mut() {
+                                let b = cls.control_in_chunk( ControlInChunked::new(&mut self.control, &req));
+                                if b {
+                                    break
+                                }
+                            }
+                            // XXX if b is false - error
+                        }
+
                         let completed = self.control.handle_in_complete();
 
                         if !B::QUIRK_SET_ADDRESS_BEFORE_STATUS {
@@ -201,6 +212,7 @@ impl<B: UsbBus> UsbDevice<'_, B> {
                                 self.device_state = UsbDeviceState::Addressed;
                             }
                         }
+
                     }
 
                     let req = if (ep_setup & 1) != 0 {

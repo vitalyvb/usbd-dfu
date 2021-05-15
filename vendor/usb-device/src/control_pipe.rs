@@ -9,6 +9,7 @@ use core::cmp::min;
 enum ControlState {
     Idle,
     DataIn,
+    DataInChunked(Request),
     DataInZlp,
     DataInLast,
     CompleteIn(Request),
@@ -48,6 +49,14 @@ impl<B: UsbBus> ControlPipe<'_, B> {
             i: 0,
             len: 0,
         }
+    }
+
+    pub(crate) fn ep_out_size(&self) -> usize {
+        self.ep_out.max_packet_size() as usize
+    }
+
+    pub(crate) fn ep_in_size(&self) -> usize {
+        self.ep_in.max_packet_size() as usize
     }
 
     pub fn waiting_for_response(&self) -> bool {
@@ -166,7 +175,10 @@ impl<B: UsbBus> ControlPipe<'_, B> {
     pub fn handle_in_complete(&mut self) -> bool {
         match self.state {
             ControlState::DataIn => {
-                self.write_in_chunk();
+                self.write_in_chunk(None);
+            }
+            ControlState::DataInChunked(_) => {
+                // nothing
             }
             ControlState::DataInZlp => {
                 if self.ep_in.write(&[]).is_err() {
@@ -194,27 +206,59 @@ impl<B: UsbBus> ControlPipe<'_, B> {
         return false;
     }
 
-    fn write_in_chunk(&mut self) {
-        let count = min(self.len - self.i, self.ep_in.max_packet_size() as usize);
+    pub(crate) fn write_in_chunk(&mut self, chunk: Option<&[u8]>) -> Result<()> {
+        let ep_size = self.ep_in.max_packet_size() as usize;
+        let maxlen = min(ep_size, self.len - self.i);
 
-        let buffer = self.static_in_buf.unwrap_or(&self.buf);
-        let count = match self.ep_in.write(&buffer[self.i..(self.i + count)]) {
-            Ok(c) => c,
-            // There isn't much we can do if the write fails, except to wait for another poll or for
-            // the host to resend the request.
-            Err(_) => return,
+        let chunk = match (&self.state, chunk) {
+            (ControlState::DataIn, None) => {
+                &self.static_in_buf.unwrap_or(&self.buf)[self.i..self.i+maxlen]
+            },
+            (ControlState::DataInChunked(_), Some(b)) => {
+                &b[..min(b.len(), maxlen)]
+            },
+            _ => return Err(UsbError::InvalidState),
         };
 
+        if chunk.len() == 0 {
+            self.state = ControlState::DataInZlp;
+            return Ok(());
+        }
+
+        if chunk.len() > ep_size {
+            return Err(UsbError::BufferOverflow);
+        }
+
+        let count = self.ep_in.write(&chunk)?;
         self.i += count;
 
-        if self.i >= self.len {
-            self.static_in_buf = None;
+        if maxlen == ep_size && self.i <= self.len {
+            // ControlState::DataIn
+            // ControlState::DataInChunked
+        } else {
+            self.state = ControlState::DataInLast
+        };
 
-            self.state = if count == self.ep_in.max_packet_size() as usize {
-                ControlState::DataInZlp
-            } else {
-                ControlState::DataInLast
-            };
+        Ok(())
+    }
+
+    pub(crate) fn get_chunked_offset(&self) -> usize {
+        self.i
+    }
+
+    pub(crate) fn accept_in_chunks(&mut self) -> Result<()> {
+        let req = match self.state {
+            ControlState::CompleteIn(req) => req,
+            _ => return Err(UsbError::InvalidState),
+        };
+
+        self.start_in_transfer_chunked(req)
+    }
+
+    pub(crate) fn chunked_req(&self) -> Option<Request> {
+        match self.state {
+            ControlState::DataInChunked(req) => Some(req),
+            _ => None,
         }
     }
 
@@ -260,7 +304,15 @@ impl<B: UsbBus> ControlPipe<'_, B> {
         self.len = min(data_len, req.length as usize);
         self.i = 0;
         self.state = ControlState::DataIn;
-        self.write_in_chunk();
+        self.write_in_chunk(None);
+
+        Ok(())
+    }
+
+    fn start_in_transfer_chunked(&mut self, req: Request) -> Result<()> {
+        self.len = req.length as usize;
+        self.i = 0;
+        self.state = ControlState::DataInChunked(req);
 
         Ok(())
     }

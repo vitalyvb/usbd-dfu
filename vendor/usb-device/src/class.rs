@@ -5,6 +5,11 @@ use crate::descriptor::{BosWriter, DescriptorWriter};
 use crate::endpoint::EndpointAddress;
 use crate::{Result, UsbError};
 
+pub enum ChunkMode {
+    TransferDone,
+    Continue,
+}
+
 /// A trait for implementing USB classes.
 ///
 /// All methods are optional callbacks that will be called by
@@ -92,6 +97,11 @@ pub trait UsbClass<B: UsbBus> {
         let _ = xfer;
     }
 
+    fn control_in_chunk(&mut self, xfer: ControlInChunked<B>) -> bool {
+        let _ = xfer;
+        false
+    }
+
     /// Called when endpoint with address `addr` has received a SETUP packet. Implementing this
     /// shouldn't be necessary in most cases, but is provided for completeness' sake.
     ///
@@ -136,6 +146,19 @@ impl<'a, 'p, 'r, B: UsbBus> ControlIn<'a, 'p, 'r, B> {
         self.req
     }
 
+    pub fn accept_with_chunks(self, chunk: &[u8]) -> Result<ChunkMode> {
+        let max_size = self.pipe.ep_in_size();
+
+        self.pipe.accept_in_chunks()?;
+        self.pipe.write_in_chunk(Some(&chunk[..core::cmp::min(max_size, chunk.len())]))?;
+
+        if self.pipe.chunked_req().is_some() {
+            Ok(ChunkMode::Continue)
+        } else {
+            Ok(ChunkMode::TransferDone)
+        }
+    }
+
     /// Accepts the transfer with the supplied buffer.
     pub fn accept_with(self, data: &[u8]) -> Result<()> {
         self.pipe.accept_in(|buf| {
@@ -166,6 +189,45 @@ impl<'a, 'p, 'r, B: UsbBus> ControlIn<'a, 'p, 'r, B> {
         self.pipe.reject()
     }
 }
+
+pub struct ControlInChunked<'a, 'p, 'r, B: UsbBus> {
+    pipe: &'p mut ControlPipe<'a, B>,
+    req: &'r control::Request,
+}
+
+impl<'a, 'p, 'r, B: UsbBus> ControlInChunked<'a, 'p, 'r, B> {
+    pub(crate) fn new(pipe: &'p mut ControlPipe<'a, B>, req: &'r control::Request) -> Self {
+        ControlInChunked { pipe, req }
+    }
+
+    /// Gets the request from the SETUP packet.
+    pub fn request(&self) -> &control::Request {
+        self.req
+    }
+    
+    pub fn offset(&self) -> usize {
+        self.pipe.get_chunked_offset()
+    }
+
+    pub fn ep_size(&self) -> usize {
+        self.pipe.ep_in_size()
+    }
+
+    pub fn send_chunk(self, chunk: &[u8]) -> Result<ChunkMode> {
+        self.pipe.write_in_chunk(Some(chunk))?;
+        if self.pipe.chunked_req().is_some() {
+            Ok(ChunkMode::Continue)
+        } else {
+            Ok(ChunkMode::TransferDone)
+        }
+    }
+
+    /// Rejects the transfer by stalling the pipe.
+    pub fn reject(self) -> Result<()> {
+        self.pipe.reject()
+    }
+}
+
 
 /// Handle for a control OUT transfer. When implementing a class, use the methods of this object to
 /// response to the transfer with an ACT or an error (STALL condition). To ignore the request and
