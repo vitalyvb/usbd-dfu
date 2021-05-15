@@ -78,10 +78,10 @@ struct MyMem {
 
 impl DFUMemIO for MyMem {
     const MEM_INFO_STRING: &'static str = "@Flash/0x00000000/1*1Kg";
-    const INITIAL_ADDRESS_POINTER : u32 = 0x0;
-    const PAGE_PROGRAM_TIME_MS : u32 = 8;
-    const PAGE_ERASE_TIME_MS : u32 = 50;
-    const FULL_ERASE_TIME_MS : u32 = 50;
+    const INITIAL_ADDRESS_POINTER: u32 = 0x0;
+    const PAGE_PROGRAM_TIME_MS: u32 = 8;
+    const PAGE_ERASE_TIME_MS: u32 = 50;
+    const FULL_ERASE_TIME_MS: u32 = 50;
     const TRANSFER_SIZE: u16 = 64;
 
     fn read_block(&mut self, address: u32, length: usize) -> Result<&[u8], DFUMemError> {

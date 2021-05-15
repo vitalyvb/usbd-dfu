@@ -168,7 +168,7 @@ pub trait DFUMemIO {
     ///
     /// > *area* - count of blocks, block size, and supported operations for the region, e.g. 8*1Ke - 8 blocks of 1024 bytes, available for reading and writing.
     ///
-    /// Block size supports these suffixes: **K**, **M**, **G**
+    /// Block size supports these suffixes: **K**, **M**, **G**, or ` ` (space) for bytes.
     ///
     /// And a letter that specifies region's supported operation:
     ///
@@ -339,10 +339,14 @@ pub trait DFUMemIO {
     ///
     fn manifestation(&mut self) -> Result<(), DFUManifestationError>;
 
-    /// Called if USB is reset.
+    /// Called every time when USB is reset.
     ///
-    /// Device should switch to an application firmware if it's possible and this
-    /// function should not return.
+    /// After firmware update is done, device should switch to an application
+    /// firmware if it's possible and this function should not return.
+    ///
+    /// Handler will need to distinguish between actual host resets and
+    /// when the device connects the first time at startup to avoid
+    /// device reset and revert to main firmware at boot.
     ///
     /// If firmware is corrupt, this funciton should return and DFU will switch
     /// to ERROR state so host could try to recover. This is the default.
