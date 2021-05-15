@@ -389,6 +389,8 @@ pub struct DFUClass<B: UsbBus, M: DFUMemIO> {
     interface_string: StringIndex,
     _bus: PhantomData<B>,
     mem: M,
+
+    cw: Option<MyControlInWriter>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -453,6 +455,11 @@ impl From<DFUStatus> for [u8; 6] {
             0,
         ]
     }
+}
+
+struct MyControlInWriter {
+    address: u32,
+    len: usize,
 }
 
 impl<B: UsbBus, M: DFUMemIO> UsbClass<B> for DFUClass<B, M> {
@@ -543,6 +550,43 @@ impl<B: UsbBus, M: DFUMemIO> UsbClass<B> for DFUClass<B, M> {
         }
     }
 
+    fn control_in_chunk(&mut self, xfer: ControlInChunked<B>) -> bool {
+
+        if self.cw.is_some() {
+            let ep_size = xfer.ep_size();
+            let offset = xfer.offset();
+
+            let mts = M::TRANSFER_SIZE as usize;
+
+            let cw = self.cw.as_ref().unwrap();
+            let address = cw.address as usize;
+            let ts = cw.len;
+
+            let mut wr = min(ep_size, mts - min(offset, ts));
+
+            if offset >= mts {
+                wr = 0;
+            }
+
+            if let Ok(b) = self.mem.read_block((address+offset) as u32, wr) {
+
+                if let Ok(ChunkMode::Continue) = xfer.send_chunk(b)  {
+                    // continue
+                } else {
+                    // done or error
+                    self.cw = None;
+                }
+            } else {
+                self.cw = None;
+                xfer.reject().ok();
+            }
+
+            return true;
+        }
+
+        false
+    }
+
     // Handle a control request from the host.
     fn control_out(&mut self, xfer: ControlOut<B>) {
         let req = *xfer.request();
@@ -615,6 +659,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
             interface_string: alloc.string(),
             _bus: PhantomData,
             mem,
+            cw: None,
         }
     }
 
@@ -797,6 +842,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                 .address_pointer
                 .checked_add((block_num as u32) * (transfer_size as u32))
             {
+                // XXX transfer_size can be ep_size if we're in chunked mode
                 match self.mem.read_block(address, transfer_size as usize) {
                     Ok(b) => {
                         if b.len() < M::TRANSFER_SIZE as usize {
@@ -805,7 +851,27 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                         } else {
                             self.status.new_state_ok(DFUState::DfuUploadIdle);
                         }
-                        xfer.accept_with(&b).ok();
+
+                        if let Ok(ChunkMode::Continue) = xfer.accept_with_chunks(b) {
+                            self.cw = Some(MyControlInWriter {address, len: transfer_size as usize});
+                        }
+
+                        /* 2 */
+                        // if b.len() > 0 {
+                        //     if xfer.accept_with_chunks(&b[..min(b.len(), 32)]).is_ok() {
+                        //         self.cw = Some(MyControlInWriter {address, len: transfer_size as usize, offset: 0 });
+                        //     }
+                        // } else {
+                        //     xfer.accept_with(&[]).ok();
+                        // }
+
+                        /* 1 */
+                        // self.cw = Some(MyControlInWriter {address, len: transfer_size as usize, offset: 0 });
+                        // xfer.accept_with_chunks(&b[..32]).ok();
+                        // if b.len() == 0 {
+                        //     self.cw = None;
+                        // }
+
                         return;
                     }
                     Err(e) => {
