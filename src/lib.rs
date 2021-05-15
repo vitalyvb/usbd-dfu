@@ -148,9 +148,9 @@
 //! ```
 //!
 //! ### Example bootloader implementation
-//! 
+//!
 //! See [usbd-dfu-example](https://github.com/vitalyvb/usbd-dfu-example) for a functioning example.
-//! 
+//!
 
 /// DFU protocol module
 pub mod class;
