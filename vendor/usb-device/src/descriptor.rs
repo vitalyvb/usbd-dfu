@@ -44,7 +44,7 @@ pub struct DescriptorWriter<'a> {
 }
 
 impl DescriptorWriter<'_> {
-    pub(crate) fn new(buf: &mut [u8]) -> DescriptorWriter<'_> {
+    pub fn new(buf: &mut [u8]) -> DescriptorWriter<'_> {
         DescriptorWriter {
             buf,
             position: 0,
@@ -79,7 +79,7 @@ impl DescriptorWriter<'_> {
         Ok(())
     }
 
-    pub(crate) fn device(&mut self, config: &device::Config) -> Result<()> {
+    pub fn device(&mut self, config: &device::Config) -> Result<()> {
         self.write(
             descriptor_type::DEVICE,
             &[
@@ -103,7 +103,7 @@ impl DescriptorWriter<'_> {
         )
     }
 
-    pub(crate) fn configuration(&mut self, config: &device::Config) -> Result<()> {
+    pub fn configuration(&mut self, config: &device::Config) -> Result<()> {
         self.num_interfaces_mark = Some(self.position + 4);
 
         self.write_iads = config.composite_with_iads;
@@ -127,11 +127,11 @@ impl DescriptorWriter<'_> {
         )
     }
 
-    pub(crate) fn end_class(&mut self) {
+    pub fn end_class(&mut self) {
         self.num_endpoints_mark = None;
     }
 
-    pub(crate) fn end_configuration(&mut self) {
+    pub fn end_configuration(&mut self) {
         let position = self.position as u16;
         self.buf[2..4].copy_from_slice(&position.to_le_bytes());
     }

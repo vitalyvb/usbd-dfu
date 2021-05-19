@@ -1,4 +1,4 @@
-use crate::bus::{StringIndex, UsbBus};
+use crate::{bus::{StringIndex, UsbBus}, device};
 use crate::control;
 use crate::control_pipe::ControlPipe;
 use crate::descriptor::{BosWriter, DescriptorWriter};
@@ -134,16 +134,21 @@ pub trait UsbClass<B: UsbBus> {
 pub struct ControlIn<'a, 'p, 'r, B: UsbBus> {
     pipe: &'p mut ControlPipe<'a, B>,
     req: &'r control::Request,
+    config: &'p device::Config<'a>,
 }
 
 impl<'a, 'p, 'r, B: UsbBus> ControlIn<'a, 'p, 'r, B> {
-    pub(crate) fn new(pipe: &'p mut ControlPipe<'a, B>, req: &'r control::Request) -> Self {
-        ControlIn { pipe, req }
+    pub(crate) fn new(pipe: &'p mut ControlPipe<'a, B>, req: &'r control::Request, config: &'p device::Config<'a>) -> Self {
+        ControlIn { pipe, req, config }
     }
 
     /// Gets the request from the SETUP packet.
     pub fn request(&self) -> &control::Request {
         self.req
+    }
+
+    pub fn config(&self) -> &'p device::Config<'a> {
+        self.config
     }
 
     pub fn accept_with_chunks(self, chunk: &[u8]) -> Result<ChunkMode> {
@@ -193,11 +198,12 @@ impl<'a, 'p, 'r, B: UsbBus> ControlIn<'a, 'p, 'r, B> {
 pub struct ControlInChunked<'a, 'p, 'r, B: UsbBus> {
     pipe: &'p mut ControlPipe<'a, B>,
     req: &'r control::Request,
+    config: &'p device::Config<'a>,
 }
 
 impl<'a, 'p, 'r, B: UsbBus> ControlInChunked<'a, 'p, 'r, B> {
-    pub(crate) fn new(pipe: &'p mut ControlPipe<'a, B>, req: &'r control::Request) -> Self {
-        ControlInChunked { pipe, req }
+    pub(crate) fn new(pipe: &'p mut ControlPipe<'a, B>, req: &'r control::Request, config: &'p device::Config<'a> ) -> Self {
+        ControlInChunked { pipe, req, config }
     }
 
     /// Gets the request from the SETUP packet.
@@ -211,6 +217,10 @@ impl<'a, 'p, 'r, B: UsbBus> ControlInChunked<'a, 'p, 'r, B> {
 
     pub fn ep_size(&self) -> usize {
         self.pipe.ep_in_size()
+    }
+
+    pub fn config(&self) -> &'p device::Config<'a> {
+        self.config
     }
 
     pub fn send_chunk(self, chunk: &[u8]) -> Result<ChunkMode> {

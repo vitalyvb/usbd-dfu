@@ -32,7 +32,7 @@ const MAX_ENDPOINTS: usize = 16;
 /// A USB device consisting of one or more device classes.
 pub struct UsbDevice<'a, B: UsbBus> {
     bus: &'a B,
-    config: Config<'a>,
+    pub config: Config<'a>,
     control: ControlPipe<'a, B>,
     device_state: UsbDeviceState,
     remote_wakeup_enabled: bool,
@@ -40,7 +40,7 @@ pub struct UsbDevice<'a, B: UsbBus> {
     pending_address: u8,
 }
 
-pub(crate) struct Config<'a> {
+pub struct Config<'a> {
     pub device_class: u8,
     pub device_sub_class: u8,
     pub device_protocol: u8,
@@ -194,7 +194,7 @@ impl<B: UsbBus> UsbDevice<'_, B> {
 
                         if let Some(req) = self.control.chunked_req() {
                             for cls in classes.iter_mut() {
-                                let b = cls.control_in_chunk( ControlInChunked::new(&mut self.control, &req));
+                                let b = cls.control_in_chunk( ControlInChunked::new(&mut self.control, &req, &self.config));
                                 if b {
                                     break
                                 }
@@ -294,7 +294,7 @@ impl<B: UsbBus> UsbDevice<'_, B> {
         use crate::control::{Recipient, Request};
 
         for cls in classes.iter_mut() {
-            cls.control_in(ControlIn::new(&mut self.control, &req));
+            cls.control_in(ControlIn::new(&mut self.control, &req, &self.config));
 
             if !self.control.waiting_for_response() {
                 return;
@@ -302,7 +302,7 @@ impl<B: UsbBus> UsbDevice<'_, B> {
         }
 
         if req.request_type == control::RequestType::Standard {
-            let xfer = ControlIn::new(&mut self.control, &req);
+            let xfer = ControlIn::new(&mut self.control, &req, &self.config);
 
             match (req.recipient, req.request) {
                 (Recipient::Device, Request::GET_STATUS) => {
