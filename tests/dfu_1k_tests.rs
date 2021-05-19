@@ -210,16 +210,21 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFU {
 #[test]
 fn test_1k_get_configuration() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
+        let mut buf = [0u8; 8192];
         let mut len;
 
         // get configuration descriptor
-        len = transact(&mut dfu, &[0x80, 0x6, 0, 2, 0, 0, 0x80, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 27);
+        len = transact(&mut dfu, &[0x80, 0x6, 0, 2, 0, 0, 0, 0x20], None, &mut buf).expect("len");
+        assert!(len >= 27);
 
         let device = &buf[..9];
         let interf = &buf[9..18];
-        let config = &buf[18..len];
+        let config = &buf[18..27];
+        let tail = &buf[27..len];
+
+        assert_eq!(tail.len(), 4096-27);
+        dbg!(tail);
+        // tail is [0x55; 101] ++ [x; 4096-27-101], where x = index/32
 
         // skip device, first byte should be 9=length
         assert_eq!(device[0], 9);

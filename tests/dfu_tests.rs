@@ -207,6 +207,7 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFU {
 }
 
 #[test]
+#[ignore = "large descriptor test"]
 fn test_get_configuration() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];

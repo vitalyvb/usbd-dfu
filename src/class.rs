@@ -391,6 +391,7 @@ pub struct DFUClass<B: UsbBus, M: DFUMemIO> {
     mem: M,
 
     cw: Option<MyControlInWriter>,
+    dw: Option<MyDescriptorWriter>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -462,6 +463,11 @@ struct MyControlInWriter {
     len: usize,
 }
 
+struct MyDescriptorWriter {
+    buf: [u8; 128],
+    counter: usize,
+}
+
 impl<B: UsbBus, M: DFUMemIO> UsbClass<B> for DFUClass<B, M> {
     fn get_configuration_descriptors(
         &self,
@@ -521,6 +527,32 @@ impl<B: UsbBus, M: DFUMemIO> UsbClass<B> for DFUClass<B, M> {
     // Handle control requests to the host.
     fn control_in(&mut self, xfer: ControlIn<B>) {
         let req = *xfer.request();
+
+        if req.request_type == control::RequestType::Standard &&
+           req.recipient == control::Recipient::Device &&
+           req.request == control::Request::GET_DESCRIPTOR {
+            let (dtype, index) = req.descriptor_type_index();
+            if dtype == usb_device::descriptor::descriptor_type::CONFIGURATION {
+
+                use usb_device::descriptor::DescriptorWriter;
+                let mut xbuf = [0x55u8; 128];
+                let mut w = DescriptorWriter::new(&mut xbuf);
+
+                w.configuration(xfer.config());
+
+                // for cls in classes {
+                    self.get_configuration_descriptors(&mut w);
+                    w.end_class();
+                // }
+
+                w.end_configuration();
+
+                if let Ok(ChunkMode::Continue) = xfer.accept_with_chunks(&xbuf) {
+                    self.dw = Some(MyDescriptorWriter {buf: xbuf, counter: 0});
+                }
+            }
+            return;
+        }
 
         if req.request_type != control::RequestType::Class {
             return;
@@ -583,7 +615,33 @@ impl<B: UsbBus, M: DFUMemIO> UsbClass<B> for DFUClass<B, M> {
 
             return true;
         }
+        else if self.dw.is_some() {
+            let mut b = [0u8; 32];
+            let mut size = 32;
+            let offset = xfer.offset();
+            let dw = self.dw.as_mut().unwrap();
 
+            if offset < dw.buf.len() {
+                b.copy_from_slice(&dw.buf[offset..offset+32])
+            } else {
+                b.fill((offset / 32) as u8);
+            }
+
+            dw.counter += 1;
+            if dw.counter >= 128 {
+                // stop after 32*128 = 4k bytes
+                size = 0;
+            }
+
+            if let Ok(ChunkMode::Continue) = xfer.send_chunk(&b[..size])  {
+                // continue
+            } else {
+                // done or error
+                self.cw = None;
+            }
+
+            return true;
+        }
         false
     }
 
@@ -660,6 +718,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
             _bus: PhantomData,
             mem,
             cw: None,
+            dw: None,
         }
     }
 
