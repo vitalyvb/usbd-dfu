@@ -166,9 +166,9 @@ pub trait DFUMemIO {
     ///
     /// > *address* - Memory address of a regions, e.g. "0x08000000"
     ///
-    /// > *area* - count of blocks, block size, and supported operations for the region, e.g. 8*1Ke - 8 blocks of 1024 bytes, available for reading and writing.
+    /// > *area* - count of pages, page size, and supported operations for the region, e.g. 8*1Ke - 8 pages of 1024 bytes, available for reading and writing.
     ///
-    /// Block size supports these suffixes: **K**, **M**, **G**, or ` ` (space) for bytes.
+    /// Page size supports these suffixes: **K**, **M**, **G**, or ` ` (space) for bytes.
     ///
     /// And a letter that specifies region's supported operation:
     ///
@@ -188,8 +188,8 @@ pub trait DFUMemIO {
     /// ```
     ///
     /// Denotes a memory region named "Flash", with a starting address `0x08000000`,
-    /// the first 16 blocks with a size 1K are available only for reading, and the next
-    /// 48 1K-blocks are avaiable for reading, erase, and write operations.
+    /// the first 16 pages with a size 1K are available only for reading, and the next
+    /// 48 1K-pages are avaiable for reading, erase, and write operations.
     const MEM_INFO_STRING: &'static str;
 
     /// If set, DFU descriptor will have *bitCanDnload* bit set. Default is `true`.
@@ -226,12 +226,12 @@ pub trait DFUMemIO {
     /// >    before issuing the next command. Device, after submitting a reply
     /// >    starts program operation.
     /// > 4. After waiting for a specified number of milliseconds, host continues to send new commands.
-    const PAGE_PROGRAM_TIME_MS: u32;
+    const BLOCK_PROGRAM_TIME_MS: u32;
 
-    /// Similar to [`PAGE_PROGRAM_TIME_MS`](DFUMemIO::PAGE_PROGRAM_TIME_MS), but for a block erase operation.
+    /// Similar to [`BLOCK_PROGRAM_TIME_MS`](DFUMemIO::BLOCK_PROGRAM_TIME_MS), but for a page erase operation.
     const PAGE_ERASE_TIME_MS: u32;
 
-    /// Similar to [`PAGE_PROGRAM_TIME_MS`](DFUMemIO::PAGE_PROGRAM_TIME_MS), but for a full erase operation.
+    /// Similar to [`BLOCK_PROGRAM_TIME_MS`](DFUMemIO::BLOCK_PROGRAM_TIME_MS), but for a full erase operation.
     const FULL_ERASE_TIME_MS: u32;
 
     /// Time in milliseconds host must wait after submitting the final firware download
@@ -244,7 +244,7 @@ pub trait DFUMemIO {
     /// [`MANIFESTATION_TOLERANT`](DFUMemIO::MANIFESTATION_TOLERANT) is `false`), or it can return to IDLE state
     /// (if `MANIFESTATION_TOLERANT` is `true`)
     ///
-    /// See also [`PAGE_PROGRAM_TIME_MS`](DFUMemIO::PAGE_PROGRAM_TIME_MS).
+    /// See also [`BLOCK_PROGRAM_TIME_MS`](DFUMemIO::BLOCK_PROGRAM_TIME_MS).
     const MANIFESTATION_TIME_MS: u32 = 1;
 
     /// wDetachTimeOut field in DFU descriptor. Default value: `250` ms.
@@ -308,7 +308,7 @@ pub trait DFUMemIO {
     ///
     fn program_block(&mut self, address: u32, length: usize) -> Result<(), DFUMemError>;
 
-    /// Trigger block erase.
+    /// Trigger page erase.
     ///
     /// Implementation must ensure that address is valid, or return an error.
     ///
@@ -316,7 +316,7 @@ pub trait DFUMemIO {
     // / This function by default is called from USB interrupt context, depending on
     // / [`MEMIO_IN_USB_INTERRUPT`](DFUMemIO::MEMIO_IN_USB_INTERRUPT) value.
     ///
-    fn erase_block(&mut self, address: u32) -> Result<(), DFUMemError>;
+    fn erase_page(&mut self, address: u32) -> Result<(), DFUMemError>;
 
     /// Trigger full erase.
     ///
@@ -324,7 +324,7 @@ pub trait DFUMemIO {
     // / This function by default is called from USB interrupt context, depending on
     // / [`MEMIO_IN_USB_INTERRUPT`](DFUMemIO::MEMIO_IN_USB_INTERRUPT) value.
     ///
-    fn erase_all_blocks(&mut self) -> Result<(), DFUMemError>;
+    fn erase_all_pages(&mut self) -> Result<(), DFUMemError>;
 
     /// Finish writing firmware to a persistent storage, and optionally activate it.
     ///
