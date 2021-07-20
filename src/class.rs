@@ -400,7 +400,7 @@ pub struct DFUClass<B: UsbBus, M: DFUMemIO> {
 enum Command {
     None,
     EraseAll,
-    EraseBlock(u32),
+    Erase(u32),
     SetAddressPointer(u32),
     ReadUnprotect,
     WriteMemory { block_num: u16, len: u16 },
@@ -744,7 +744,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                             | ((data[2] as u32) << 8)
                             | ((data[3] as u32) << 16)
                             | ((data[4] as u32) << 24);
-                        self.status.command = Command::EraseBlock(addr);
+                        self.status.command = Command::Erase(addr);
                         self.status.new_state_ok(DFUState::DfuDnloadSync);
                         xfer.accept().ok();
                         return;
@@ -865,7 +865,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                 len: _,
             } => M::PROGRAM_TIME_MS,
             Command::EraseAll => M::FULL_ERASE_TIME_MS,
-            Command::EraseBlock(_) => M::ERASE_TIME_MS,
+            Command::Erase(_) => M::ERASE_TIME_MS,
             Command::LeaveDFU => M::MANIFESTATION_TIME_MS,
             _ => 0,
         }
@@ -904,7 +904,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                 Err(e) => self.status.new_state_status(DFUState::DfuError, e.into()),
                 Ok(_) => self.status.new_state_ok(DFUState::DfuDnloadSync),
             },
-            Command::EraseBlock(b) => match self.mem.erase(b) {
+            Command::Erase(b) => match self.mem.erase(b) {
                 Err(e) => self.status.new_state_status(DFUState::DfuError, e.into()),
                 Ok(_) => self.status.new_state_ok(DFUState::DfuDnloadSync),
             },
@@ -965,7 +965,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                 | Command::SetAddressPointer(_)
                 | Command::ReadUnprotect
                 | Command::EraseAll
-                | Command::EraseBlock(_) => {
+                | Command::Erase(_) => {
                     self.status.pending = self.status.command;
                     self.status.command = Command::None;
                     self.status.new_state_ok(DFUState::DfuDnBusy);
