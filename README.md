@@ -79,27 +79,27 @@ struct MyMem {
 impl DFUMemIO for MyMem {
     const MEM_INFO_STRING: &'static str = "@Flash/0x00000000/1*1Kg";
     const INITIAL_ADDRESS_POINTER: u32 = 0x0;
-    const PAGE_PROGRAM_TIME_MS: u32 = 8;
-    const PAGE_ERASE_TIME_MS: u32 = 50;
+    const PROGRAM_TIME_MS: u32 = 8;
+    const ERASE_TIME_MS: u32 = 50;
     const FULL_ERASE_TIME_MS: u32 = 50;
     const TRANSFER_SIZE: u16 = 64;
 
-    fn read_block(&mut self, address: u32, length: usize) -> Result<&[u8], DFUMemError> {
+    fn read(&mut self, address: u32, length: usize) -> Result<&[u8], DFUMemError> {
         // TODO: check address value
         let offset = address as usize;
         Ok(&self.flash_memory[offset..offset+length])
     }
 
-    fn erase_block(&mut self, address: u32) -> Result<(), DFUMemError> {
+    fn erase(&mut self, address: u32) -> Result<(), DFUMemError> {
         // TODO: check address value
         self.flash_memory.fill(0xff);
         // TODO: verify that block is erased successfully
         Ok(())
     }
 
-    fn erase_all_blocks(&mut self) -> Result<(), DFUMemError> {
+    fn erase_all(&mut self) -> Result<(), DFUMemError> {
         // There is only one block, erase it.
-        self.erase_block(0)
+        self.erase(0)
     }
 
     fn store_write_buffer(&mut self, src:&[u8]) -> Result<(), ()>{
@@ -107,7 +107,7 @@ impl DFUMemIO for MyMem {
         Ok(())
     }
 
-    fn program_block(&mut self, address: u32, length: usize) -> Result<(), DFUMemError>{
+    fn program(&mut self, address: u32, length: usize) -> Result<(), DFUMemError>{
         // TODO: check address value
         let offset = address as usize;
 

@@ -17,8 +17,8 @@ impl DFUMemIO for TestMem {
     const INITIAL_ADDRESS_POINTER: u32 = TESTMEM_BASE;
     const MANIFESTATION_TOLERANT: bool = true;
     const MANIFESTATION_TIME_MS: u32 = 0x123;
-    const PAGE_PROGRAM_TIME_MS: u32 = 0;
-    const PAGE_ERASE_TIME_MS: u32 = 0;
+    const PROGRAM_TIME_MS: u32 = 0;
+    const ERASE_TIME_MS: u32 = 0;
     const FULL_ERASE_TIME_MS: u32 = 0;
     const MEM_INFO_STRING: &'static str = "@Flash/0x02000000/16*1Ka,48*1Kg";
     const HAS_DOWNLOAD: bool = false;
@@ -27,19 +27,15 @@ impl DFUMemIO for TestMem {
     const TRANSFER_SIZE: u16 = 128;
     // const MEMIO_IN_USB_INTERRUPT: bool = false;
 
-    fn read_block(
-        &mut self,
-        address: u32,
-        length: usize,
-    ) -> core::result::Result<&[u8], DFUMemError> {
+    fn read(&mut self, address: u32, length: usize) -> core::result::Result<&[u8], DFUMemError> {
         Err(DFUMemError::Address)
     }
 
-    fn erase_block(&mut self, address: u32) -> core::result::Result<(), DFUMemError> {
+    fn erase(&mut self, address: u32) -> core::result::Result<(), DFUMemError> {
         Ok(())
     }
 
-    fn erase_all_blocks(&mut self) -> Result<(), DFUMemError> {
+    fn erase_all(&mut self) -> Result<(), DFUMemError> {
         Ok(())
     }
 
@@ -47,11 +43,7 @@ impl DFUMemIO for TestMem {
         Ok(())
     }
 
-    fn program_block(
-        &mut self,
-        address: u32,
-        length: usize,
-    ) -> core::result::Result<(), DFUMemError> {
+    fn program(&mut self, address: u32, length: usize) -> core::result::Result<(), DFUMemError> {
         Err(DFUMemError::Address)
     }
 
