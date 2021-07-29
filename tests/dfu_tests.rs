@@ -13,11 +13,11 @@ pub struct TestMem {
 }
 
 struct TestMemOverride {
-    read_block: Option<
+    read: Option<
         fn(&mut TestMem, address: u32, length: usize) -> core::result::Result<&[u8], DFUMemError>,
     >,
-    erase_block: Option<fn(&mut TestMem, address: u32) -> Result<(), DFUMemError>>,
-    program_block: Option<
+    erase: Option<fn(&mut TestMem, address: u32) -> Result<(), DFUMemError>>,
+    program: Option<
         fn(&mut TestMem, address: u32, length: usize) -> core::result::Result<(), DFUMemError>,
     >,
     manifestation: Option<fn(&mut TestMem) -> Result<(), DFUManifestationError>>,
@@ -26,9 +26,9 @@ struct TestMemOverride {
 impl TestMem {
     fn new(overrides: Option<TestMemOverride>) -> Self {
         let tmo = overrides.unwrap_or(TestMemOverride {
-            read_block: None,
-            erase_block: None,
-            program_block: None,
+            read: None,
+            erase: None,
+            program: None,
             manifestation: None,
         });
         Self {
@@ -91,8 +91,8 @@ const TESTMEM_BASE: u32 = 0x0200_0000;
 impl DFUMemIO for TestMem {
     const INITIAL_ADDRESS_POINTER: u32 = TESTMEM_BASE;
     const MANIFESTATION_TOLERANT: bool = false;
-    const PAGE_PROGRAM_TIME_MS: u32 = 50;
-    const PAGE_ERASE_TIME_MS: u32 = 0x1ff;
+    const PROGRAM_TIME_MS: u32 = 50;
+    const ERASE_TIME_MS: u32 = 0x1ff;
     const FULL_ERASE_TIME_MS: u32 = 0x2_0304;
     const MEM_INFO_STRING: &'static str = "@Flash/0x02000000/16*1Ka,48*1Kg";
     const HAS_DOWNLOAD: bool = true;
@@ -100,13 +100,9 @@ impl DFUMemIO for TestMem {
     const DETACH_TIMEOUT: u16 = 0x1122;
     const TRANSFER_SIZE: u16 = 128;
 
-    fn read_block(
-        &mut self,
-        address: u32,
-        length: usize,
-    ) -> core::result::Result<&[u8], DFUMemError> {
-        if self.overrides.read_block.is_some() {
-            return self.overrides.read_block.unwrap()(self, address, length);
+    fn read(&mut self, address: u32, length: usize) -> core::result::Result<&[u8], DFUMemError> {
+        if self.overrides.read.is_some() {
+            return self.overrides.read.unwrap()(self, address, length);
         }
         if address < TESTMEM_BASE {
             return Err(DFUMemError::Address);
@@ -121,9 +117,9 @@ impl DFUMemIO for TestMem {
         Ok(&self.buffer[..min(length, len)])
     }
 
-    fn erase_block(&mut self, address: u32) -> core::result::Result<(), DFUMemError> {
-        if self.overrides.erase_block.is_some() {
-            return self.overrides.erase_block.unwrap()(self, address);
+    fn erase(&mut self, address: u32) -> core::result::Result<(), DFUMemError> {
+        if self.overrides.erase.is_some() {
+            return self.overrides.erase.unwrap()(self, address);
         }
 
         if address < TESTMEM_BASE {
@@ -144,7 +140,7 @@ impl DFUMemIO for TestMem {
         Ok(())
     }
 
-    fn erase_all_blocks(&mut self) -> Result<(), DFUMemError> {
+    fn erase_all(&mut self) -> Result<(), DFUMemError> {
         for block in (0..TESTMEMSIZE).step_by(1024) {
             self.erase(block);
         }
@@ -156,13 +152,9 @@ impl DFUMemIO for TestMem {
         Ok(())
     }
 
-    fn program_block(
-        &mut self,
-        address: u32,
-        length: usize,
-    ) -> core::result::Result<(), DFUMemError> {
-        if self.overrides.program_block.is_some() {
-            return self.overrides.program_block.unwrap()(self, address, length);
+    fn program(&mut self, address: u32, length: usize) -> core::result::Result<(), DFUMemError> {
+        if self.overrides.program.is_some() {
+            return self.overrides.program.unwrap()(self, address, length);
         }
 
         if address < TESTMEM_BASE {
@@ -301,7 +293,7 @@ fn test_set_address_pointer() {
 }
 
 #[test]
-fn test_block_upload() {
+fn test_upload() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];
         let mut len;
@@ -345,16 +337,16 @@ fn test_block_upload() {
 }
 
 #[test]
-fn test_block_erase() {
+fn test_erase() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];
         let mut len;
 
         let blkaddr: u32 = TestMem::INITIAL_ADDRESS_POINTER + 1024;
-        let et = TestMem::PAGE_ERASE_TIME_MS.to_le_bytes();
+        let et = TestMem::ERASE_TIME_MS.to_le_bytes();
 
         assert_ne!(blkaddr, dfu.get_address_pointer());
-        assert_ne!(0, TestMem::PAGE_ERASE_TIME_MS);
+        assert_ne!(0, TestMem::ERASE_TIME_MS);
 
         /* Get Status */
         len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
@@ -413,7 +405,7 @@ fn test_block_erase() {
 }
 
 #[test]
-fn test_block_erase_all() {
+fn test_erase_all() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];
         let mut len;
@@ -489,7 +481,7 @@ fn test_block_erase_all() {
 }
 
 #[test]
-fn test_block_upload_last() {
+fn test_upload_last() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];
         let mut len;
@@ -543,7 +535,7 @@ fn test_block_upload_last() {
 }
 
 #[test]
-fn test_block_upload_err_bad_address() {
+fn test_upload_err_bad_address() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];
         let mut len;
@@ -595,7 +587,7 @@ fn test_block_upload_err_bad_address() {
 }
 
 #[test]
-fn test_block_download_to_upload_err() {
+fn test_download_to_upload_err() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];
         let mut len;
@@ -643,7 +635,7 @@ fn test_block_download_to_upload_err() {
 }
 
 #[test]
-fn test_block_download_program0() {
+fn test_download_program0() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];
         let mut len;
@@ -696,7 +688,7 @@ fn test_block_download_program0() {
 }
 
 #[test]
-fn test_block_download_program_err_verify_and_to_idle() {
+fn test_download_program_err_verify_and_to_idle() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];
         let mut len;
@@ -738,7 +730,7 @@ fn test_block_download_program_err_verify_and_to_idle() {
 }
 
 #[test]
-fn test_block_erase_and_program() {
+fn test_erase_and_program() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];
         let mut len;
@@ -861,9 +853,9 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUMTret {
             Ok(())
         }
         let overrides = TestMemOverride {
-            read_block: None,
-            erase_block: None,
-            program_block: None,
+            read: None,
+            erase: None,
+            program: None,
             manifestation: Some(manifestation),
         };
         DFUClass::new(&alloc, TestMem::new(Some(overrides)))
@@ -936,9 +928,9 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUMTerr {
             Err(DFUManifestationError::NotDone)
         }
         let overrides = TestMemOverride {
-            read_block: None,
-            erase_block: None,
-            program_block: None,
+            read: None,
+            erase: None,
+            program: None,
             manifestation: Some(manifestation),
         };
         DFUClass::new(&alloc, TestMem::new(Some(overrides)))
@@ -996,14 +988,14 @@ struct MkDFUEraseerr {}
 
 impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUEraseerr {
     fn create<'a>(&mut self, alloc: &'a UsbBusAllocator<TestBus>) -> DFUClass<TestBus, TestMem> {
-        fn erase_block(tm: &mut TestMem, address: u32) -> core::result::Result<(), DFUMemError> {
+        fn erase(tm: &mut TestMem, address: u32) -> core::result::Result<(), DFUMemError> {
             Err(DFUMemError::CheckErased)
         }
 
         let overrides = TestMemOverride {
-            read_block: None,
-            erase_block: Some(erase_block),
-            program_block: None,
+            read: None,
+            erase: Some(erase),
+            program: None,
             manifestation: None,
         };
         DFUClass::new(&alloc, TestMem::new(Some(overrides)))
@@ -1050,7 +1042,7 @@ struct MkDFUProgerr {}
 
 impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUProgerr {
     fn create<'a>(&mut self, alloc: &'a UsbBusAllocator<TestBus>) -> DFUClass<TestBus, TestMem> {
-        fn program_block(tm: &mut TestMem, address: u32, length: usize) -> Result<(), DFUMemError> {
+        fn program(tm: &mut TestMem, address: u32, length: usize) -> Result<(), DFUMemError> {
             if address > TestMem::INITIAL_ADDRESS_POINTER {
                 Err(DFUMemError::Write)
             } else {
@@ -1059,9 +1051,9 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUProgerr {
         }
 
         let overrides = TestMemOverride {
-            read_block: None,
-            erase_block: None,
-            program_block: Some(program_block),
+            read: None,
+            erase: None,
+            program: Some(program),
             manifestation: None,
         };
         DFUClass::new(&alloc, TestMem::new(Some(overrides)))
@@ -1129,7 +1121,7 @@ struct MkDFUReadErr {}
 
 impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUReadErr {
     fn create<'a>(&mut self, alloc: &'a UsbBusAllocator<TestBus>) -> DFUClass<TestBus, TestMem> {
-        fn read_block(
+        fn read(
             tm: &mut TestMem,
             address: u32,
             length: usize,
@@ -1142,9 +1134,9 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUReadErr {
         }
 
         let overrides = TestMemOverride {
-            read_block: Some(read_block),
-            erase_block: None,
-            program_block: None,
+            read: Some(read),
+            erase: None,
+            program: None,
             manifestation: None,
         };
         DFUClass::new(&alloc, TestMem::new(Some(overrides)))
@@ -1190,7 +1182,7 @@ fn test_read_err_addr_vend() {
 }
 
 #[test]
-fn test_block_download_program_short() {
+fn test_download_program_short() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];
         let mut len;

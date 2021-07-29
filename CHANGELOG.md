@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+- Rename parts of the `DFUMemIO` API to remove confusing block/page terminology. ([#4])(https://github.com/vitalyvb/usbd-dfu/pull/4)
+- Rename `Command::EraseBlock` to `Command::Erase`. ([#4])(https://github.com/vitalyvb/usbd-dfu/pull/4)
+
 ## [0.1.1] - 2021-05-15
 ### Added
 - CI using GitHub Actions

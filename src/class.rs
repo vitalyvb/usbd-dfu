@@ -140,11 +140,12 @@ pub enum DFUManifestationError {
     Unknown = DFUStatusCode::ErrUnknown as u8,
 }
 
-/// Trait that describes the abstraction used to access memory
-/// on a device. [`DFUClass`] will call corresponding
-/// functions and will use provided constants to tailor
-/// DFU features and, for example time interval values that
+/// Trait that describes the abstraction used to access memory on a device. [`DFUClass`] will call corresponding
+/// functions and will use provided constants to tailor DFU features and, for example time interval values that
 /// are used in the protocol.
+///
+/// In this context we use "page" to mean the smallest region of flash memory which can be erased, and "block"
+/// to mean an amount of memory which is to be used for reading or programming.
 pub trait DFUMemIO {
     /// Specifies the default value of Address Pointer
     ///
@@ -166,9 +167,9 @@ pub trait DFUMemIO {
     ///
     /// > *address* - Memory address of a regions, e.g. "0x08000000"
     ///
-    /// > *area* - count of blocks, block size, and supported operations for the region, e.g. 8*1Ke - 8 blocks of 1024 bytes, available for reading and writing.
+    /// > *area* - count of pages, page size, and supported operations for the region, e.g. 8*1Ke - 8 pages of 1024 bytes, available for reading and writing.
     ///
-    /// Block size supports these suffixes: **K**, **M**, **G**, or ` ` (space) for bytes.
+    /// Page size supports these suffixes: **K**, **M**, **G**, or ` ` (space) for bytes.
     ///
     /// And a letter that specifies region's supported operation:
     ///
@@ -188,8 +189,8 @@ pub trait DFUMemIO {
     /// ```
     ///
     /// Denotes a memory region named "Flash", with a starting address `0x08000000`,
-    /// the first 16 blocks with a size 1K are available only for reading, and the next
-    /// 48 1K-blocks are avaiable for reading, erase, and write operations.
+    /// the first 16 pages with a size 1K are available only for reading, and the next
+    /// 48 1K-pages are avaiable for reading, erase, and write operations.
     const MEM_INFO_STRING: &'static str;
 
     /// If set, DFU descriptor will have *bitCanDnload* bit set. Default is `true`.
@@ -226,12 +227,12 @@ pub trait DFUMemIO {
     /// >    before issuing the next command. Device, after submitting a reply
     /// >    starts program operation.
     /// > 4. After waiting for a specified number of milliseconds, host continues to send new commands.
-    const PAGE_PROGRAM_TIME_MS: u32;
+    const PROGRAM_TIME_MS: u32;
 
-    /// Similar to [`PAGE_PROGRAM_TIME_MS`](DFUMemIO::PAGE_PROGRAM_TIME_MS), but for a block erase operation.
-    const PAGE_ERASE_TIME_MS: u32;
+    /// Similar to [`PROGRAM_TIME_MS`](DFUMemIO::PROGRAM_TIME_MS), but for a page erase operation.
+    const ERASE_TIME_MS: u32;
 
-    /// Similar to [`PAGE_PROGRAM_TIME_MS`](DFUMemIO::PAGE_PROGRAM_TIME_MS), but for a full erase operation.
+    /// Similar to [`PROGRAM_TIME_MS`](DFUMemIO::PROGRAM_TIME_MS), but for a full erase operation.
     const FULL_ERASE_TIME_MS: u32;
 
     /// Time in milliseconds host must wait after submitting the final firware download
@@ -244,7 +245,7 @@ pub trait DFUMemIO {
     /// [`MANIFESTATION_TOLERANT`](DFUMemIO::MANIFESTATION_TOLERANT) is `false`), or it can return to IDLE state
     /// (if `MANIFESTATION_TOLERANT` is `true`)
     ///
-    /// See also [`PAGE_PROGRAM_TIME_MS`](DFUMemIO::PAGE_PROGRAM_TIME_MS).
+    /// See also [`PROGRAM_TIME_MS`](DFUMemIO::PROGRAM_TIME_MS).
     const MANIFESTATION_TIME_MS: u32 = 1;
 
     /// wDetachTimeOut field in DFU descriptor. Default value: `250` ms.
@@ -258,7 +259,7 @@ pub trait DFUMemIO {
 
     /// Maximum allowed transfer size. Default value: `128` bytes.
     ///
-    /// This is the maximum size of a block for [`read_block()`](DFUMemIO::read_block) and [`program_block()`](DFUMemIO::program_block) functions.
+    /// This is the maximum size of a block for [`read()`](DFUMemIO::read) and [`program()`](DFUMemIO::program) functions.
     ///
     /// All DFU transfers use Control endpoint only.
     ///
@@ -295,7 +296,7 @@ pub trait DFUMemIO {
     ///
     /// This function is called from `usb_dev.poll([])` (USB interrupt context).
     ///
-    fn read_block(&mut self, address: u32, length: usize) -> Result<&[u8], DFUMemError>;
+    fn read(&mut self, address: u32, length: usize) -> Result<&[u8], DFUMemError>;
 
     /// Trigger block program
     ///
@@ -306,9 +307,9 @@ pub trait DFUMemIO {
     // / This function by default is called from USB interrupt context, depending on
     // / [`MEMIO_IN_USB_INTERRUPT`](DFUMemIO::MEMIO_IN_USB_INTERRUPT) value.
     ///
-    fn program_block(&mut self, address: u32, length: usize) -> Result<(), DFUMemError>;
+    fn program(&mut self, address: u32, length: usize) -> Result<(), DFUMemError>;
 
-    /// Trigger block erase.
+    /// Trigger page erase.
     ///
     /// Implementation must ensure that address is valid, or return an error.
     ///
@@ -316,7 +317,7 @@ pub trait DFUMemIO {
     // / This function by default is called from USB interrupt context, depending on
     // / [`MEMIO_IN_USB_INTERRUPT`](DFUMemIO::MEMIO_IN_USB_INTERRUPT) value.
     ///
-    fn erase_block(&mut self, address: u32) -> Result<(), DFUMemError>;
+    fn erase(&mut self, address: u32) -> Result<(), DFUMemError>;
 
     /// Trigger full erase.
     ///
@@ -324,7 +325,7 @@ pub trait DFUMemIO {
     // / This function by default is called from USB interrupt context, depending on
     // / [`MEMIO_IN_USB_INTERRUPT`](DFUMemIO::MEMIO_IN_USB_INTERRUPT) value.
     ///
-    fn erase_all_blocks(&mut self) -> Result<(), DFUMemError>;
+    fn erase_all(&mut self) -> Result<(), DFUMemError>;
 
     /// Finish writing firmware to a persistent storage, and optionally activate it.
     ///
@@ -399,7 +400,7 @@ pub struct DFUClass<B: UsbBus, M: DFUMemIO> {
 enum Command {
     None,
     EraseAll,
-    EraseBlock(u32),
+    Erase(u32),
     SetAddressPointer(u32),
     ReadUnprotect,
     WriteMemory { block_num: u16, len: u16 },
@@ -743,7 +744,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                             | ((data[2] as u32) << 8)
                             | ((data[3] as u32) << 16)
                             | ((data[4] as u32) << 24);
-                        self.status.command = Command::EraseBlock(addr);
+                        self.status.command = Command::Erase(addr);
                         self.status.new_state_ok(DFUState::DfuDnloadSync);
                         xfer.accept().ok();
                         return;
@@ -801,7 +802,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                 .address_pointer
                 .checked_add((block_num as u32) * (transfer_size as u32))
             {
-                match self.mem.read_block(address, transfer_size as usize) {
+                match self.mem.read(address, transfer_size as usize) {
                     Ok(b) => {
                         if b.len() < M::TRANSFER_SIZE as usize {
                             // short frame, back to idle
@@ -862,9 +863,9 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
             Command::WriteMemory {
                 block_num: _,
                 len: _,
-            } => M::PAGE_PROGRAM_TIME_MS,
+            } => M::PROGRAM_TIME_MS,
             Command::EraseAll => M::FULL_ERASE_TIME_MS,
-            Command::EraseBlock(_) => M::PAGE_ERASE_TIME_MS,
+            Command::Erase(_) => M::ERASE_TIME_MS,
             Command::LeaveDFU => M::MANIFESTATION_TIME_MS,
             _ => 0,
         }
@@ -899,11 +900,11 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
 
     fn update_impl(&mut self) {
         match self.status.pending {
-            Command::EraseAll => match self.mem.erase_all_blocks() {
+            Command::EraseAll => match self.mem.erase_all() {
                 Err(e) => self.status.new_state_status(DFUState::DfuError, e.into()),
                 Ok(_) => self.status.new_state_ok(DFUState::DfuDnloadSync),
             },
-            Command::EraseBlock(b) => match self.mem.erase_block(b) {
+            Command::Erase(b) => match self.mem.erase(b) {
                 Err(e) => self.status.new_state_status(DFUState::DfuError, e.into()),
                 Ok(_) => self.status.new_state_ok(DFUState::DfuDnloadSync),
             },
@@ -934,7 +935,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                     .address_pointer
                     .checked_add((block_num as u32) * (len as u32))
                 {
-                    match self.mem.program_block(pointer, len as usize) {
+                    match self.mem.program(pointer, len as usize) {
                         Err(e) => self.status.new_state_status(DFUState::DfuError, e.into()),
                         Ok(_) => self.status.new_state_ok(DFUState::DfuDnloadSync),
                     }
@@ -964,7 +965,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                 | Command::SetAddressPointer(_)
                 | Command::ReadUnprotect
                 | Command::EraseAll
-                | Command::EraseBlock(_) => {
+                | Command::Erase(_) => {
                     self.status.pending = self.status.command;
                     self.status.command = Command::None;
                     self.status.new_state_ok(DFUState::DfuDnBusy);
