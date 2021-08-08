@@ -6,9 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2021-08-08
+
 ### Breaking Changes
-- Rename parts of the `DFUMemIO` API to remove confusing block/page terminology. ([#4])(https://github.com/vitalyvb/usbd-dfu/pull/4)
-- Rename `Command::EraseBlock` to `Command::Erase`. ([#4])(https://github.com/vitalyvb/usbd-dfu/pull/4)
+- Rename parts of the `DFUMemIO` API to remove confusing block/page terminology. ([#4](https://github.com/vitalyvb/usbd-dfu/pull/4)):
+   - `DFUMemIO::PAGE_PROGRAM_TIME_MS` to `DFUMemIO::PROGRAM_TIME_MS`
+   - `DFUMemIO::PAGE_ERASE_TIME_MS` to `DFUMemIO::ERASE_TIME_MS`
+   - `DFUMemIO::read_block()` to `DFUMemIO::read()`
+   - `DFUMemIO::erase_block()` to `DFUMemIO::erase()`
+   - `DFUMemIO::erase_all_blocks()` to `DFUMemIO::erase_all()`
+   - `DFUMemIO::program_block()` to `DFUMemIO::program()`
+
+- Rename `Command::EraseBlock` to `Command::Erase`. ([#4](https://github.com/vitalyvb/usbd-dfu/pull/4))
+
+### Fixed
+- Some Clippy warnings
 
 ## [0.1.1] - 2021-05-15
 ### Added
@@ -28,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First version.
 
-[Unreleased]: https://github.com/vitalyvb/usbd-dfu/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/vitalyvb/usbd-dfu/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/vitalyvb/usbd-dfu/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/vitalyvb/usbd-dfu/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/vitalyvb/usbd-dfu/releases/tag/v0.1.0
