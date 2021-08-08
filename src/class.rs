@@ -508,10 +508,10 @@ impl<B: UsbBus, M: DFUMemIO> UsbClass<B> for DFUClass<B, M> {
     }
 
     fn get_string(&self, index: StringIndex, lang_id: u16) -> Option<&str> {
-        if lang_id == usb_device::descriptor::lang_id::ENGLISH_US || lang_id == 0 {
-            if index == self.interface_string {
-                return Some(M::MEM_INFO_STRING);
-            }
+        if (lang_id == usb_device::descriptor::lang_id::ENGLISH_US || lang_id == 0)
+            && (index == self.interface_string)
+        {
+            return Some(M::MEM_INFO_STRING);
         }
         None
     }
@@ -613,7 +613,7 @@ impl<B: UsbBus, M: DFUMemIO> UsbClass<B> for DFUClass<B, M> {
 impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
     /// Creates a new DFUClass with the provided UsbBus and
     /// DFUMemIO
-    pub fn new<'a>(alloc: &'a UsbBusAllocator<B>, mem: M) -> Self {
+    pub fn new(alloc: &UsbBusAllocator<B>, mem: M) -> Self {
         Self {
             if_num: alloc.interface(),
             status: DFUStatus::new(M::INITIAL_ADDRESS_POINTER),
