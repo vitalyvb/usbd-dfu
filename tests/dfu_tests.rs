@@ -670,6 +670,31 @@ fn test_download_program0() {
         assert_eq!(len, 6);
         assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
 
+        /* Download block 3 (offset 1), with a wLength of 64 bytes, emulate short write */
+        len = transact(
+            &mut dfu,
+            &[0x21, 0x1, 3, 0, 0, 0, 64, 0],
+            Some(&[0x00; 64]),
+            &mut buf,
+        )
+        .expect("len");
+        assert_eq!(len, 0);
+
+        /* Get State */
+        len = transact(&mut dfu, &[0xa1, 0x5, 0, 0, 0, 0, 1, 0], None, &mut buf).expect("len");
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 3); // dfuDnloadSync
+
+        /* Get Status */
+        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
+        assert_eq!(len, 6);
+        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+
+        /* Get Status */
+        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
+        assert_eq!(len, 6);
+        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+
         /* Abort */
         len = transact(&mut dfu, &[0x21, 0x6, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
         assert_eq!(len, 0);
@@ -679,11 +704,17 @@ fn test_download_program0() {
         assert_eq!(len, 128);
         assert_eq!(&buf[0..128], &[0; 128]);
 
-        /* Upload block 3 (offset 1) - intact */
+        /* Upload block 3 (offset 1) - must be 0 for the first 64 bytes and intact for the rest */
         len = transact(&mut dfu, &[0xa1, 0x2, 3, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
         assert_eq!(len, 128);
-        assert_eq!(&buf[0..10], &[64, 0, 65, 0, 66, 0, 67, 0, 68, 0]);
-        assert_eq!(&buf[120..128], &[124, 0, 125, 0, 126, 0, 127, 0]);
+        assert_eq!(&buf[0..64], &[0; 64]);
+        assert_eq!(&buf[64..72], &[96, 0, 97, 0, 98, 0, 99, 0]);
+
+        /* Upload block 4 (offset 2) - intact */
+        len = transact(&mut dfu, &[0xa1, 0x2, 4, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
+        assert_eq!(len, 128);
+        assert_eq!(&buf[0..10], &[128, 0, 129, 0, 130, 0, 131, 0, 132, 0]);
+        assert_eq!(&buf[120..128], &[188, 0, 189, 0, 190, 0, 191, 0]);
     });
 }
 

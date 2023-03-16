@@ -800,7 +800,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
             if let Some(address) = self
                 .status
                 .address_pointer
-                .checked_add((block_num as u32) * (transfer_size as u32))
+                .checked_add((block_num as u32) * (M::TRANSFER_SIZE as u32))
             {
                 match self.mem.read(address, transfer_size as usize) {
                     Ok(b) => {
@@ -933,7 +933,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                 if let Some(pointer) = self
                     .status
                     .address_pointer
-                    .checked_add((block_num as u32) * (len as u32))
+                    .checked_add((block_num as u32) * (M::TRANSFER_SIZE as u32))
                 {
                     match self.mem.program(pointer, len as usize) {
                         Err(e) => self.status.new_state_status(DFUState::DfuError, e.into()),
