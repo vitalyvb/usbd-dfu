@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2023-03-18
+
+### Breaking Changes
+- Behavior change: use `DFUMemIO::TRANSFER_SIZE` instead of a request length
+for address compuration in Download and Upload commands. If Host programmer
+is using smaller block sizes, uploads and downloads will be corrupted.
+
+### Fixed
+- Fixed programming error because of incorrect memory address calculation
+when writing the last and short block of the firmware without SetAddressPointer
+command ([#6](https://github.com/vitalyvb/usbd-dfu/pull/6))
+
+### Changed
+- Rust edition set to 2021
+- `usb-device` dependency updated to 0.2.9
+- Documentation of `DFUMemIO::TRANSFER_SIZE`
+
 ## [0.2.0] - 2021-08-08
 
 ### Breaking Changes
@@ -40,7 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First version.
 
-[Unreleased]: https://github.com/vitalyvb/usbd-dfu/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/vitalyvb/usbd-dfu/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/vitalyvb/usbd-dfu/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/vitalyvb/usbd-dfu/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/vitalyvb/usbd-dfu/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/vitalyvb/usbd-dfu/releases/tag/v0.1.0
