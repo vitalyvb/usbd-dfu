@@ -257,9 +257,16 @@ pub trait DFUMemIO {
     /// if USB reset request is not received before reverting to a normal operation.
     const DETACH_TIMEOUT: u16 = 250;
 
-    /// Maximum allowed transfer size. Default value: `128` bytes.
+    /// Expected transfer size. Default value: `128` bytes.
     ///
     /// This is the maximum size of a block for [`read()`](DFUMemIO::read) and [`program()`](DFUMemIO::program) functions.
+    ///
+    /// This also sets `wTransferSize` in DFU Functional descriptor.
+    ///
+    /// Host should use exactly this transfer size for all blocks except for the last one.
+    /// The last block can be shorter. If transfer size is too large, Host may choose
+    /// to use a smaller block size, in this case firmware may be written incorrectly
+    /// if Host is not using `Set Address Pointer` command.
     ///
     /// All DFU transfers use Control endpoint only.
     ///
@@ -298,7 +305,7 @@ pub trait DFUMemIO {
     ///
     fn read(&mut self, address: u32, length: usize) -> Result<&[u8], DFUMemError>;
 
-    /// Trigger block program
+    /// Trigger block program.
     ///
     /// Implementation must check that address is in a target region and that the
     /// whole block fits in this region too.
