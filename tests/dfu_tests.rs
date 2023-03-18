@@ -635,7 +635,7 @@ fn test_download_to_upload_err() {
 }
 
 #[test]
-fn test_download_program0() {
+fn test_download_program0_with_tail() {
     with_usb(&mut MkDFU {}, |mut dfu, transact| {
         let mut buf = [0u8; 256];
         let mut len;
@@ -709,12 +709,13 @@ fn test_download_program0() {
         assert_eq!(len, 128);
         assert_eq!(&buf[0..64], &[0; 64]);
         assert_eq!(&buf[64..72], &[96, 0, 97, 0, 98, 0, 99, 0]);
+        assert_eq!(&buf[120..128], &[124, 0, 125, 0, 126, 0, 127, 0]);
 
-        /* Upload block 4 (offset 2) - intact */
-        len = transact(&mut dfu, &[0xa1, 0x2, 4, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
+        /* Upload block 4 (offset 2) - intact, short read of 64 bytes */
+        len = transact(&mut dfu, &[0xa1, 0x2, 4, 0, 0, 0, 64, 0], None, &mut buf).expect("len");
+        assert_eq!(len, 64);
         assert_eq!(&buf[0..10], &[128, 0, 129, 0, 130, 0, 131, 0, 132, 0]);
-        assert_eq!(&buf[120..128], &[188, 0, 189, 0, 190, 0, 191, 0]);
+        assert_eq!(&buf[56..64], &[156, 0, 157, 0, 158, 0, 159, 0]);
     });
 }
 
