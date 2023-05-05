@@ -630,6 +630,12 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
         }
     }
 
+    /// This function will consume self and return the owned memory
+    /// argument that was moved in the call to new()
+    pub fn release(self) -> M {
+        self.mem
+    }
+
     /// This function may be called just after `DFUClass::new()` to
     /// set DFU error state to "Device detected unexpected power on reset"
     /// instead of the usual `dfuIdle`.
