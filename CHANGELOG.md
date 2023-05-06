@@ -6,7 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2023-05-06
+
+### Added
 - New `DFUClass::release()` to consume class and release owned memory argument.
+([#9](https://github.com/vitalyvb/usbd-dfu/pull/9))
 
 ## [0.3.0] - 2023-03-18
 
@@ -59,7 +63,8 @@ command ([#6](https://github.com/vitalyvb/usbd-dfu/pull/6))
 
 First version.
 
-[Unreleased]: https://github.com/vitalyvb/usbd-dfu/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/vitalyvb/usbd-dfu/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/vitalyvb/usbd-dfu/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/vitalyvb/usbd-dfu/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/vitalyvb/usbd-dfu/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/vitalyvb/usbd-dfu/compare/v0.1.0...v0.1.1
