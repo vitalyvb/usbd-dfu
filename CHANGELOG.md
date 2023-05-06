@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- New `DFUClass::release()` to consume class and release owned memory argument.
+
 ## [0.3.0] - 2023-03-18
 
 ### Breaking Changes
