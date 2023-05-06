@@ -1,10 +1,10 @@
 on:
   push:
-    branches: [ main ]
+#    branches: [ main ]
   pull_request:
   workflow_dispatch:
-  schedule:
-    - cron:  '12 10 9 * *'
+#  schedule:
+#    - cron:  '12 10 9 * *'
 
 name: Continuous integration
 
@@ -19,96 +19,64 @@ jobs:
           - nightly
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@master
+        id: toolchain
         with:
-          profile: minimal
           toolchain: ${{ matrix.rust }}
-          override: true
           components: rustfmt, clippy
 
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
-
-      - uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --all
+      - run: cargo +${{steps.toolchain.outputs.name}} fmt --all -- --check
+      - run: cargo +${{steps.toolchain.outputs.name}} clippy --all
 
   build_only:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target:
-          - thumbv7m-none-eabi
         rust:
           - stable
           - nightly
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@master
+        id: toolchain
         with:
-          profile: minimal
           toolchain: ${{ matrix.rust }}
-          target: ${{ matrix.target }}
-          override: true
+          targets: thumbv7m-none-eabi
 
-      - uses: actions-rs/cargo@v1
-        with:
-          command: build
+      - run: cargo +${{steps.toolchain.outputs.name}} build --target thumbv7m-none-eabi
 
   tests:
     needs: [build_only]
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-          - i686-unknown-linux-gnu
         rust:
           - stable
           - nightly
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
-      - uses: actions-rs/toolchain@v1
+      - name: Install 32-bit build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y libc6-dev-i386
+
+      - uses: dtolnay/rust-toolchain@master
+        id: toolchain
         with:
-          profile: minimal
           toolchain: ${{ matrix.rust }}
-          target: ${{ matrix.target }}
-          override: true
+          targets: "x86_64-unknown-linux-gnu,i686-unknown-linux-gnu"
 
-      - uses: actions-rs/cargo@v1
-        with:
-          command: build
+      - run: cargo +${{steps.toolchain.outputs.name}} build --target x86_64-unknown-linux-gnu
+      - run: cargo +${{steps.toolchain.outputs.name}} test --target x86_64-unknown-linux-gnu
+      - run: cargo +${{steps.toolchain.outputs.name}} doc --target x86_64-unknown-linux-gnu
 
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
+      - run: cargo clean
 
-  docs:
-    needs: [build_only]
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust:
-          - stable
-
-    steps:
-      - uses: actions/checkout@v2
-
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
-
-      - uses: actions-rs/cargo@v1
-        with:
-          command: doc
+      - run: cargo +${{steps.toolchain.outputs.name}} build --target i686-unknown-linux-gnu
+      - run: cargo +${{steps.toolchain.outputs.name}} test --target i686-unknown-linux-gnu
