@@ -23,6 +23,6 @@ jobs:
         with:
           targets: thumbv7m-none-eabi
 
-      - run: cargo +${{steps.toolchain.outputs.name}} publish --target thumbv7m-none-eabi --dry-run
+      - run: cargo +${{steps.toolchain.outputs.name}} publish --target thumbv7m-none-eabi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
