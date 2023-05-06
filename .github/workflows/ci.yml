@@ -29,29 +29,23 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all
 
-#  build_only:
-#    runs-on: ubuntu-latest
-#    strategy:
-#      matrix:
-#        target:
-#          - thumbv7m-none-eabi
-#        rust:
-#          - stable
-#          - nightly
-#
-#    steps:
-#      - uses: actions/checkout@v2
-#
-#      - uses: actions-rs/toolchain@v1
-#        with:
-#          profile: minimal
-#          toolchain: ${{ matrix.rust }}
-#          target: ${{ matrix.target }}
-#          override: true
-#
-#      - uses: actions-rs/cargo@v1
-#        with:
-#          command: build
+  build_only:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - nightly
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          targets: thumbv7m-none-eabi
+
+      - run: cargo build --target thumbv7m-none-eabi
 
 #  tests:
 #    needs: [build_only]
