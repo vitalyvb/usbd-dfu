@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Created CREDITS.md
 - Updated README.md and copyright notice in LICENSE file
+- Bump tests dependency stm32f1xx-hal to 0.10.0
 
 ## [0.3.1] - 2023-05-06
 

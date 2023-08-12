@@ -16,5 +16,5 @@ exclude = [
 version = "0.2.9"
 
 [dev-dependencies.stm32f1xx-hal]
-version = "0.7.0"
+version = "0.10.0"
 features = ["rt", "stm32f103", "medium", "stm32-usbd"]
