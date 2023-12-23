@@ -821,7 +821,7 @@ impl<B: UsbBus, M: DFUMemIO> DFUClass<B, M> {
                         } else {
                             self.status.new_state_ok(DFUState::DfuUploadIdle);
                         }
-                        xfer.accept_with(&b).ok();
+                        xfer.accept_with(b).ok();
                         return;
                     }
                     Err(e) => {
