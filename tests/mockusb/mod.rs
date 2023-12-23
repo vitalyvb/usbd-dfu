@@ -291,13 +291,17 @@ pub fn with_usb<T, M>(
     let mut cls = maker.create(&alloc);
 
     let mut usb_dev = UsbDeviceBuilder::new(&alloc, UsbVidPid(0x1234, 0x1234))
-        .manufacturer("Test")
-        .product("Test")
-        .serial_number("Test")
+        .strings(&[StringDescriptors::default()
+            .manufacturer("Test")
+            .product("Test")
+            .serial_number("Test")])
+        .unwrap()
         .device_release(0x0200)
         .self_powered(false)
         .max_power(250)
+        .unwrap()
         .max_packet_size_0(EP0_SIZE)
+        .unwrap()
         .build();
 
     usb_dev.poll(&mut [&mut cls]);

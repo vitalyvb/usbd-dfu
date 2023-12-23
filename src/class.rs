@@ -514,10 +514,8 @@ impl<B: UsbBus, M: DFUMemIO> UsbClass<B> for DFUClass<B, M> {
         Ok(())
     }
 
-    fn get_string(&self, index: StringIndex, lang_id: u16) -> Option<&str> {
-        if (lang_id == usb_device::descriptor::lang_id::ENGLISH_US || lang_id == 0)
-            && (index == self.interface_string)
-        {
+    fn get_string(&self, index: StringIndex, lang_id: LangID) -> Option<&str> {
+        if index == self.interface_string && lang_id == LangID::EN_US {
             return Some(M::MEM_INFO_STRING);
         }
         None

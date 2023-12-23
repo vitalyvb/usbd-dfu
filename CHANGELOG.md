@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `usb-device` dependency updated to 0.3.1
 - Created CREDITS.md
 - Updated README.md and copyright notice in LICENSE file
 - Bump tests dependency stm32f1xx-hal to 0.10.0
