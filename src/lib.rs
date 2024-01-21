@@ -66,11 +66,25 @@
 //! use usb_device::prelude::*;
 //! use usbd_dfu::*;
 //! #
-//! # use usb_device::prelude::*;
 //! # use usb_device::bus::UsbBusAllocator;
-//! # use stm32f1xx_hal::usb::{Peripheral, UsbBus, UsbBusType};
 //! #
-//! # let usb_bus_alloc: UsbBusAllocator<UsbBus<Peripheral>> = unsafe { core::mem::MaybeUninit::<UsbBusAllocator<UsbBus<Peripheral>>>::uninit().assume_init() };
+//! # pub struct DummyUsbBus { }
+//! # impl usb_device::bus::UsbBus for DummyUsbBus {
+//! #     fn alloc_ep(&mut self, _: usb_device::UsbDirection, _: Option<usb_device::endpoint::EndpointAddress>,
+//! #                 _: usb_device::endpoint::EndpointType, _: u16, _: u8) -> usb_device::Result<usb_device::endpoint::EndpointAddress> { todo!() }
+//! #     fn enable(&mut self) { todo!() }
+//! #     fn reset(&self) { todo!() }
+//! #     fn set_device_address(&self, _: u8) { todo!() }
+//! #     fn write(&self, _: usb_device::endpoint::EndpointAddress, _: &[u8]) -> usb_device::Result<usize> { todo!() }
+//! #     fn read(&self, _: usb_device::endpoint::EndpointAddress, _: &mut [u8]) -> usb_device::Result<usize> { todo!() }
+//! #     fn set_stalled(&self, _: usb_device::endpoint::EndpointAddress, _: bool) { todo!() }
+//! #     fn is_stalled(&self, _: usb_device::endpoint::EndpointAddress) -> bool { todo!() }
+//! #     fn suspend(&self) { todo!() }
+//! #     fn resume(&self) { todo!() }
+//! #     fn poll(&self) -> usb_device::bus::PollResult { todo!() }
+//! # }
+//! #
+//! # let usb_bus_alloc: UsbBusAllocator<DummyUsbBus> = unsafe { core::mem::MaybeUninit::<UsbBusAllocator<DummyUsbBus>>::uninit().assume_init() };
 //! # let mut usb_dev = UsbDeviceBuilder::new(&usb_bus_alloc, UsbVidPid(0, 0)).build();
 //!
 //! // DFUClass will use MyMem to actually read, erase or program the memory.

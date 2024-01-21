@@ -14,10 +14,3 @@ exclude = [
 
 [dependencies.usb-device]
 version = "0.3.1"
-
-[dev-dependencies.stm32f1xx-hal]
-version = "0.10.0"
-features = ["rt", "stm32f103", "medium", "stm32-usbd"]
-
-[patch.crates-io]
-stm32-usbd = { git = "https://github.com/vitalyvb/stm32-usbd.git", branch = "usb-device-3" }
