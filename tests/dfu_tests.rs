@@ -238,8 +238,13 @@ fn test_get_configuration() {
             ]
         );
 
+        // get string descriptor languages
+        len = transact(&mut dfu, &[0x80, 0x6, 0, 3, 0, 0, 0x80, 0], None, &mut buf).expect("len");
+        assert_eq!(len, 4);
+        assert_eq!(&buf[0..4], &[len as u8, 3u8, 9, 4]); // 0x409 = EN_US
+
         // get string descriptor
-        len = transact(&mut dfu, &[0x80, 0x6, 4, 3, 0, 0, 0x80, 0], None, &mut buf).expect("len");
+        len = transact(&mut dfu, &[0x80, 0x6, 4, 3, 9, 4, 0x80, 0], None, &mut buf).expect("len");
         assert_eq!(len, 2 + TestMem::MEM_INFO_STRING.len() * 2);
         assert_eq!(&buf[0..2], &[len as u8, 3u8]);
         let u16v: Vec<_> = buf[2..len]

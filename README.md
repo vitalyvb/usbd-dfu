@@ -53,11 +53,14 @@ supporting DFU protocol, for example:
 
 ## License
 
-This project is licensed under [MIT License](https://opensource.org/licenses/MIT) ([LICENSE](https://github.com/vitalyvb/usbd-dfu/blob/main/LICENSE)).
+This project is licensed under [MIT License](https://opensource.org/licenses/MIT)
+([LICENSE](https://github.com/vitalyvb/usbd-dfu/blob/main/LICENSE)).
 
 ### Contribution
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you shall be licensed as above, without any additional terms or conditions.
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in the work by you shall be licensed as above,
+without any additional terms or conditions.
 
 ## Example
 

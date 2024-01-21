@@ -6,10 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - yyyy-mm-dd
+
+### Breaking Changes
+- `usb-device` dependency updated to 0.3.1. No API changes in `usbd-dfu`,
+however, there may be type compatibility issues if anything else
+depends on `usb-device` 0.2.x
+
 ### Changed
 - Created CREDITS.md
 - Updated README.md and copyright notice in LICENSE file
-- Bump tests dependency stm32f1xx-hal to 0.10.0
+- Remove dev-dependency on stm32f1xx-hal
 
 ## [0.3.1] - 2023-05-06
 
@@ -68,7 +75,8 @@ command ([#6](https://github.com/vitalyvb/usbd-dfu/pull/6))
 
 First version.
 
-[Unreleased]: https://github.com/vitalyvb/usbd-dfu/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/vitalyvb/usbd-dfu/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/vitalyvb/usbd-dfu/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/vitalyvb/usbd-dfu/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/vitalyvb/usbd-dfu/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/vitalyvb/usbd-dfu/compare/v0.1.1...v0.2.0
