@@ -243,7 +243,7 @@ fn test_get_configuration() {
         assert_eq!(len, 4);
         assert_eq!(&buf[0..4], &[len as u8, 3u8, 9, 4]); // 0x409 = EN_US
 
-        // get string descriptor
+        // get string descriptor (EN_US)
         len = transact(&mut dfu, &[0x80, 0x6, 4, 3, 9, 4, 0x80, 0], None, &mut buf).expect("len");
         assert_eq!(len, 2 + TestMem::MEM_INFO_STRING.len() * 2);
         assert_eq!(&buf[0..2], &[len as u8, 3u8]);
@@ -253,6 +253,20 @@ fn test_get_configuration() {
             .collect();
         let istr = String::from_utf16(&u16v).unwrap();
         assert_eq!(istr, TestMem::MEM_INFO_STRING);
+
+        // get string descriptor (lang_id = 0)
+        len = transact(&mut dfu, &[0x80, 0x6, 4, 3, 0, 0, 0x80, 0], None, &mut buf).expect("len");
+        assert_eq!(len, 2 + TestMem::MEM_INFO_STRING.len() * 2);
+        assert_eq!(&buf[0..2], &[len as u8, 3u8]);
+        let u16v: Vec<_> = buf[2..len]
+            .chunks(2)
+            .map(|v| (v[0] as u16) | ((v[1] as u16) << 8))
+            .collect();
+        let istr = String::from_utf16(&u16v).unwrap();
+        assert_eq!(istr, TestMem::MEM_INFO_STRING);
+
+        // get string descriptor unsupported lang_id (lang_id = 1)
+        transact(&mut dfu, &[0x80, 0x6, 4, 3, 1, 0, 0x80, 0], None, &mut buf).expect_err("stall");
     });
 }
 
