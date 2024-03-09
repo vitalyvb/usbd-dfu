@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - yyyy-mm-dd
 
 ### Breaking Changes
-- `usb-device` dependency updated to 0.3.1. No API changes in `usbd-dfu`,
+- `usb-device` dependency updated to 0.3.2. No API changes in `usbd-dfu`,
 however, there may be type compatibility issues if anything else
 depends on `usb-device` 0.2.x
 
