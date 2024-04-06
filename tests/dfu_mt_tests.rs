@@ -1,5 +1,10 @@
 #![allow(unused_variables)]
 
+mod helpers;
+use helpers::*;
+
+use usbd_class_tester::prelude::*;
+
 use usb_device::bus::UsbBusAllocator;
 use usbd_dfu::class::*;
 
@@ -52,15 +57,15 @@ impl DFUMemIO for TestMem {
     }
 }
 
-mod mockusb;
-use mockusb::*;
-
 /// Default DFU class factory
 struct MkDFU {}
 
-impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFU {
-    fn create<'a>(&mut self, alloc: &'a UsbBusAllocator<TestBus>) -> DFUClass<TestBus, TestMem> {
-        DFUClass::new(&alloc, TestMem::new())
+impl UsbDeviceCtx<EmulatedUsbBus, DFUClass<EmulatedUsbBus, TestMem>> for MkDFU {
+    fn create_class<'a>(
+        &mut self,
+        alloc: &'a UsbBusAllocator<EmulatedUsbBus>,
+    ) -> AnyResult<DFUClass<EmulatedUsbBus, TestMem>> {
+        Ok(DFUClass::new(&alloc, TestMem::new()))
     }
 
     // fn poll(&mut self, dfu:&mut DFUClass<TestBus, TestMem>) {
@@ -72,61 +77,54 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFU {
 
 #[test]
 fn test_manifestation() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
+        let mut vec: Vec<u8>;
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(&vec[..], &status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 3 (offset 1) len 0, trigger manifestation */
-        len = transact(&mut dfu, &[0x21, 0x1, 3, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        vec = dev.download(&mut dfu, 3, &[]).expect("vec");
+        assert_eq!(&vec[..], &[]);
 
         /* Get State */
-        len = transact(&mut dfu, &[0xa1, 0x5, 0, 0, 0, 0, 1, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 1);
-        assert_eq!(buf[0], 6); // dfuManifestSync
+        vec = dev.get_state(&mut dfu).expect("vec");
+        assert_eq!(&vec[..], &[DFU_MANIFEST_SYNC]);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0x23, 0x1, 0, 7, 0]); // dfuManifest
+        vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(&vec[..], &status(STATUS_OK, 0x123, DFU_MANIFEST));
 
         /* Get State */
-        len = transact(&mut dfu, &[0xa1, 0x5, 0, 0, 0, 0, 1, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 1);
-        assert_eq!(buf[0], 6); // dfuManifestSync
+        vec = dev.get_state(&mut dfu).expect("vec");
+        assert_eq!(&vec[..], &[DFU_MANIFEST_SYNC]);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
-    });
+        vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(&vec[..], &status(STATUS_OK, 0, DFU_IDLE));
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_err_por() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
+        let mut vec: Vec<u8>;
 
         dfu.set_unexpected_reset_state();
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[13, 0, 0, 0, 10, 0]); // DfuError: ErrPOR
+        vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(&vec[..], &status(STATUS_ERR_POR, 0, DFU_ERROR));
 
         /* Clear Status */
-        len = transact(&mut dfu, &[0x21, 0x4, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        vec = dev.clear_status(&mut dfu).expect("vec");
+        assert_eq!(&vec[..], &[]);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
-    });
+        vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(&vec[..], &status(STATUS_OK, 0, DFU_IDLE));
+    })
+    .expect("with_usb");
 }

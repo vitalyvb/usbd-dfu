@@ -1,6 +1,12 @@
 #![allow(unused_variables)]
 
 use std::{cell::RefCell, cmp::min};
+
+mod helpers;
+use helpers::*;
+
+use usbd_class_tester::prelude::*;
+
 use usb_device::bus::UsbBusAllocator;
 
 use usbd_dfu::class::*;
@@ -186,31 +192,40 @@ impl DFUMemIO for TestMem {
     }
 }
 
-mod mockusb;
-use mockusb::*;
-
 /// Default DFU class factory
 struct MkDFU {}
 
-impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFU {
-    fn create<'a>(&mut self, alloc: &'a UsbBusAllocator<TestBus>) -> DFUClass<TestBus, TestMem> {
-        DFUClass::new(&alloc, TestMem::new(None))
+impl UsbDeviceCtx<EmulatedUsbBus, DFUClass<EmulatedUsbBus, TestMem>> for MkDFU {
+    fn create_class<'a>(
+        &mut self,
+        alloc: &'a UsbBusAllocator<EmulatedUsbBus>,
+    ) -> AnyResult<DFUClass<EmulatedUsbBus, TestMem>> {
+        Ok(DFUClass::new(&alloc, TestMem::new(None)))
     }
 }
 
 #[test]
+fn test_simple_get_status() {
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
+        /* Get Status */
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
+    })
+    .expect("with_usb");
+}
+
+#[test]
 fn test_get_configuration() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         // get configuration descriptor
-        len = transact(&mut dfu, &[0x80, 0x6, 0, 2, 0, 0, 0x80, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 27);
+        let vec = dev
+            .device_get_descriptor(&mut dfu, 2, 0, 0, 130)
+            .expect("vec");
+        assert_eq!(vec.len(), 27);
 
-        let device = &buf[..9];
-        let interf = &buf[9..18];
-        let config = &buf[18..len];
+        let device = &vec[..9];
+        let interf = &vec[9..18];
+        let config = &vec[18..];
 
         // skip device, first byte should be 9=length
         assert_eq!(device[0], 9);
@@ -239,128 +254,98 @@ fn test_get_configuration() {
         );
 
         // get string descriptor languages
-        len = transact(&mut dfu, &[0x80, 0x6, 0, 3, 0, 0, 0x80, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 4);
-        assert_eq!(&buf[0..4], &[len as u8, 3u8, 9, 4]); // 0x409 = EN_US
+        let vec = dev
+            .device_get_descriptor(&mut dfu, 3, 0, 0, 128)
+            .expect("vec");
+        assert_eq!(vec, [4, 3u8, 9, 4]); // 0x409 = EN_US
 
         // get string descriptor (EN_US)
-        len = transact(&mut dfu, &[0x80, 0x6, 4, 3, 9, 4, 0x80, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 2 + TestMem::MEM_INFO_STRING.len() * 2);
-        assert_eq!(&buf[0..2], &[len as u8, 3u8]);
-        let u16v: Vec<_> = buf[2..len]
-            .chunks(2)
-            .map(|v| (v[0] as u16) | ((v[1] as u16) << 8))
-            .collect();
-        let istr = String::from_utf16(&u16v).unwrap();
+        let istr = dev.device_get_string(&mut dfu, 4, 0x409).expect("str");
         assert_eq!(istr, TestMem::MEM_INFO_STRING);
 
         // get string descriptor (lang_id = 0)
-        len = transact(&mut dfu, &[0x80, 0x6, 4, 3, 0, 0, 0x80, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 2 + TestMem::MEM_INFO_STRING.len() * 2);
-        assert_eq!(&buf[0..2], &[len as u8, 3u8]);
-        let u16v: Vec<_> = buf[2..len]
-            .chunks(2)
-            .map(|v| (v[0] as u16) | ((v[1] as u16) << 8))
-            .collect();
-        let istr = String::from_utf16(&u16v).unwrap();
+        let istr = dev.device_get_string(&mut dfu, 4, 0).expect("str");
         assert_eq!(istr, TestMem::MEM_INFO_STRING);
 
         // get string descriptor unsupported lang_id (lang_id = 1)
-        transact(&mut dfu, &[0x80, 0x6, 4, 3, 1, 0, 0x80, 0], None, &mut buf).expect_err("stall");
-    });
+        dev.device_get_string(&mut dfu, 4, 1).expect_err("stall");
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_set_address_pointer() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         let new_addr: u32 = 0x2000_0000;
 
         assert_ne!(new_addr, dfu.get_address_pointer());
         assert_eq!(dfu.get_address_pointer(), TestMem::INITIAL_ADDRESS_POINTER);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 0 (command), address pointer = new_addr */
         let b = new_addr.to_le_bytes();
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 0, 0, 0, 0, 5, 0],
-            Some(&[0x21, b[0], b[1], b[2], b[3]]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev
+            .download(&mut dfu, 0, &[0x21, b[0], b[1], b[2], b[3]])
+            .expect("vec");
+        assert_eq!(vec, []);
         assert_eq!(dfu.get_address_pointer(), TestMem::INITIAL_ADDRESS_POINTER); // must change after Get Status
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DN_BUSY));
         assert_eq!(dfu.get_address_pointer(), new_addr);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
-    });
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_upload() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Upload block 2 (offset 0) */
-        len = transact(&mut dfu, &[0xa1, 0x2, 2, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..10], &[0, 0, 1, 0, 2, 0, 3, 0, 4, 0]);
-        assert_eq!(&buf[120..128], &[60, 0, 61, 0, 62, 0, 63, 0]);
+        let vec = dev.upload(&mut dfu, 2, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec[0..10], [0, 0, 1, 0, 2, 0, 3, 0, 4, 0]);
+        assert_eq!(vec[120..128], [60, 0, 61, 0, 62, 0, 63, 0]);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 9, 0]); // DfuUploadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_UPLOAD_IDLE));
 
         /* Upload block 7 (offset 5*128) */
-        len = transact(&mut dfu, &[0xa1, 0x2, 7, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..10], &[64, 1, 65, 1, 66, 1, 67, 1, 68, 1]);
-        assert_eq!(&buf[120..128], &[124, 1, 125, 1, 126, 1, 127, 1]);
+        let vec = dev.upload(&mut dfu, 7, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec[0..10], [64, 1, 65, 1, 66, 1, 67, 1, 68, 1]);
+        assert_eq!(vec[120..128], [124, 1, 125, 1, 126, 1, 127, 1]);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 9, 0]); // DfuUploadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_UPLOAD_IDLE));
 
         /* Abort */
-        len = transact(&mut dfu, &[0x21, 0x6, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.abort(&mut dfu).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
-    });
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_erase() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         let blkaddr: u32 = TestMem::INITIAL_ADDRESS_POINTER + 1024;
         let et = TestMem::ERASE_TIME_MS.to_le_bytes();
 
@@ -368,538 +353,422 @@ fn test_erase() {
         assert_ne!(0, TestMem::ERASE_TIME_MS);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 0 (command), erase = blkaddr */
         let b = blkaddr.to_le_bytes();
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 0, 0, 0, 0, 5, 0],
-            Some(&[0x41, b[0], b[1], b[2], b[3]]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev
+            .download(&mut dfu, 0, &[0x41, b[0], b[1], b[2], b[3]])
+            .expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, et[0], et[1], et[2], 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, TestMem::ERASE_TIME_MS, DFU_DN_BUSY));
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Abort */
-        len = transact(&mut dfu, &[0x21, 0x6, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.abort(&mut dfu).expect("vec");
+        assert_eq!(vec, []);
 
         /* Upload block 9 (offset 7) - not erased */
-        len = transact(&mut dfu, &[0xa1, 0x2, 9, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..10], &[192, 1, 193, 1, 194, 1, 195, 1, 196, 1]);
-        assert_eq!(&buf[120..128], &[252, 1, 253, 1, 254, 1, 255, 1]);
+        let vec = dev.upload(&mut dfu, 9, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec[0..10], [192, 1, 193, 1, 194, 1, 195, 1, 196, 1]);
+        assert_eq!(vec[120..128], [252, 1, 253, 1, 254, 1, 255, 1]);
 
         /* Upload block 10 (offset 8) - erased */
-        len = transact(&mut dfu, &[0xa1, 0x2, 10, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..10], &[0xff; 10]);
-        assert_eq!(&buf[120..128], &[0xff; 8]);
+        let vec = dev.upload(&mut dfu, 10, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec[0..10], [0xff; 10]);
+        assert_eq!(vec[120..128], [0xff; 8]);
 
         /* Upload block 17 (offset 15) - erased */
-        len = transact(&mut dfu, &[0xa1, 0x2, 15, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..10], &[0xff; 10]);
-        assert_eq!(&buf[120..128], &[0xff; 8]);
+        let vec = dev.upload(&mut dfu, 17, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec[0..10], [0xff; 10]);
+        assert_eq!(vec[120..128], [0xff; 8]);
 
         /* Upload block 18 (offset 16) - not erased */
-        len = transact(&mut dfu, &[0xa1, 0x2, 18, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..10], &[0, 4, 1, 4, 2, 4, 3, 4, 4, 4]);
-        assert_eq!(&buf[120..128], &[60, 4, 61, 4, 62, 4, 63, 4]);
-    });
+        let vec = dev.upload(&mut dfu, 18, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec[0..10], [0, 4, 1, 4, 2, 4, 3, 4, 4, 4]);
+        assert_eq!(vec[120..128], [60, 4, 61, 4, 62, 4, 63, 4]);
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_erase_all() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         let et = TestMem::FULL_ERASE_TIME_MS.to_le_bytes();
 
         assert_ne!(0, TestMem::FULL_ERASE_TIME_MS);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 0 (command), erase = full */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 0, 0, 0, 0, 1, 0],
-            Some(&[0x41]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 0, &[0x41]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, et[0], et[1], et[2], 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::FULL_ERASE_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Abort */
-        len = transact(&mut dfu, &[0x21, 0x6, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.abort(&mut dfu).expect("vec");
+        assert_eq!(vec, []);
 
         let mut blk = 2; // offset 2 is zeroth block
         loop {
             /* Upload block - erased */
-            len = transact(
-                &mut dfu,
-                &[
-                    0xa1,
-                    0x2,
-                    (blk & 0xff) as u8,
-                    (blk >> 8) as u8,
-                    0,
-                    0,
-                    128,
-                    0,
-                ],
-                None,
-                &mut buf,
-            )
-            .expect("len");
+            let vec = dev.upload(&mut dfu, blk as u16, 128).expect("vec");
 
-            if len == 0 {
+            if vec.len() == 0 {
                 break;
             }
 
-            dbg!(len);
-            dbg!(&buf[0..len]);
-
-            assert_eq!(len, 128);
-            assert_eq!(&buf[0..len], &[0xffu8; 128]);
+            assert_eq!(vec, [0xff; 128]);
 
             blk += 1;
             assert!(blk < 0xffff);
         }
         assert_eq!(blk - 2, TESTMEMSIZE / 128);
-    });
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_upload_last() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Upload block 2 (offset 0) */
-        len = transact(&mut dfu, &[0xa1, 0x2, 2, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..10], &[0, 0, 1, 0, 2, 0, 3, 0, 4, 0]);
-        assert_eq!(&buf[120..128], &[60, 0, 61, 0, 62, 0, 63, 0]);
+        let vec = dev.upload(&mut dfu, 2, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec[0..10], [0, 0, 1, 0, 2, 0, 3, 0, 4, 0]);
+        assert_eq!(vec[120..128], [60, 0, 61, 0, 62, 0, 63, 0]);
 
         /* Upload block 513 (offset 511*128) - Last block */
-        len = transact(
-            &mut dfu,
-            &[0xa1, 0x2, 0x01, 0x2, 0, 0, 128, 0],
-            None,
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 128);
+        let vec = dev.upload(&mut dfu, 513, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
         assert_eq!(
-            &buf[0..10],
-            &[192, 127, 193, 127, 194, 127, 195, 127, 196, 127]
+            vec[0..10],
+            [192, 127, 193, 127, 194, 127, 195, 127, 196, 127]
         );
-        assert_eq!(&buf[120..128], &[252, 127, 253, 127, 254, 127, 255, 127]);
+        assert_eq!(vec[120..128], [252, 127, 253, 127, 254, 127, 255, 127]);
 
-        /* Get Status,  */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 9, 0]); // DfuUploadIdle
+        /* Get Status */
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_UPLOAD_IDLE));
 
         /* Upload block 514 (offset 512*128), short read */
-        len = transact(
-            &mut dfu,
-            &[0xa1, 0x2, 0x02, 0x2, 0, 0, 128, 0],
-            None,
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.upload(&mut dfu, 514, 128).expect("vec");
+        assert_eq!(vec.len(), 0);
 
         /* Get Status, dfuIdle after short frame */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
-    });
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_upload_err_bad_address() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         let invalid_addr: u32 = TestMem::INITIAL_ADDRESS_POINTER - 0x1_0000;
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 0 (command), address pointer = invalid_addr */
         let b = invalid_addr.to_le_bytes();
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 0, 0, 0, 0, 5, 0],
-            Some(&[0x21, b[0], b[1], b[2], b[3]]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev
+            .download(&mut dfu, 0, &[0x21, b[0], b[1], b[2], b[3]])
+            .expect("vec");
+        assert_eq!(vec, []);
         assert_eq!(dfu.get_address_pointer(), TestMem::INITIAL_ADDRESS_POINTER); // must change after Get Status
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DN_BUSY));
         assert_eq!(dfu.get_address_pointer(), invalid_addr);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Abort */
-        len = transact(&mut dfu, &[0x21, 0x6, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.abort(&mut dfu).expect("vec");
+        assert_eq!(vec, []);
 
         /* Upload block 2 (offset 0) */
-        let e = transact(&mut dfu, &[0xa1, 0x2, 2, 0, 0, 0, 128, 0], None, &mut buf)
-            .expect_err("stall");
-        assert_eq!(e, EPErr::Stalled);
+        let e = dev.upload(&mut dfu, 2, 128).expect_err("stall");
+        assert_eq!(e, AnyUsbError::EP0Stalled);
 
-        /* Get Status,  */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[8, 0, 0, 0, 10, 0]); // DfuError: Address
-    });
+        /* Get Status */
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_ERR_ADDRESS, 0, DFU_ERROR));
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_download_to_upload_err() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         let xaddr: u32 = TestMem::INITIAL_ADDRESS_POINTER;
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 0 (command), address pointer */
         let b = xaddr.to_le_bytes();
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 0, 0, 0, 0, 5, 0],
-            Some(&[0x21, b[0], b[1], b[2], b[3]]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev
+            .download(&mut dfu, 0, &[0x21, b[0], b[1], b[2], b[3]])
+            .expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DN_BUSY));
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Can't call Upload from dfuDnloadIdle, expect stall */
 
         /* Upload block 2 (offset 0) */
-        let e = transact(&mut dfu, &[0xa1, 0x2, 2, 0, 0, 0, 128, 0], None, &mut buf)
-            .expect_err("stall");
-        assert_eq!(e, EPErr::Stalled);
+        let e = dev.upload(&mut dfu, 2, 128).expect_err("stall");
+        assert_eq!(e, AnyUsbError::EP0Stalled);
 
-        /* Get Status,  */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[15, 0, 0, 0, 10, 0]); // DfuError: ErrStalledPkt
-    });
+        /* Get Status */
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_ERR_STALLED_PKT, 0, DFU_ERROR));
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_download_program0_with_tail() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 2 (offset 0) */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 2, 0, 0, 0, 128, 0],
-            Some(&[0; 128]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 2, &[0; 128]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get State */
-        len = transact(&mut dfu, &[0xa1, 0x5, 0, 0, 0, 0, 1, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 1);
-        assert_eq!(buf[0], 3); // dfuDnloadSync
+        let vec = dev.get_state(&mut dfu).expect("vec");
+        assert_eq!(vec, [DFU_DNLOAD_SYNC]);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Download block 3 (offset 1), with a wLength of 64 bytes, emulate short write */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 3, 0, 0, 0, 64, 0],
-            Some(&[0x00; 64]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 3, &[0; 64]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get State */
-        len = transact(&mut dfu, &[0xa1, 0x5, 0, 0, 0, 0, 1, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 1);
-        assert_eq!(buf[0], 3); // dfuDnloadSync
+        let vec = dev.get_state(&mut dfu).expect("vec");
+        assert_eq!(vec, [DFU_DNLOAD_SYNC]);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Abort */
-        len = transact(&mut dfu, &[0x21, 0x6, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.abort(&mut dfu).expect("vec");
+        assert_eq!(vec, []);
 
         /* Upload block 2 (offset 0) - must be zeroed */
-        len = transact(&mut dfu, &[0xa1, 0x2, 2, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..128], &[0; 128]);
+        let vec = dev.upload(&mut dfu, 2, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec, [0; 128]);
 
         /* Upload block 3 (offset 1) - must be 0 for the first 64 bytes and intact for the rest */
-        len = transact(&mut dfu, &[0xa1, 0x2, 3, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..64], &[0; 64]);
-        assert_eq!(&buf[64..72], &[96, 0, 97, 0, 98, 0, 99, 0]);
-        assert_eq!(&buf[120..128], &[124, 0, 125, 0, 126, 0, 127, 0]);
+        let vec = dev.upload(&mut dfu, 3, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec[0..64], [0; 64]);
+        assert_eq!(vec[64..72], [96, 0, 97, 0, 98, 0, 99, 0]);
+        assert_eq!(vec[120..128], [124, 0, 125, 0, 126, 0, 127, 0]);
 
         /* Upload block 4 (offset 2) - intact, short read of 64 bytes */
-        len = transact(&mut dfu, &[0xa1, 0x2, 4, 0, 0, 0, 64, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 64);
-        assert_eq!(&buf[0..10], &[128, 0, 129, 0, 130, 0, 131, 0, 132, 0]);
-        assert_eq!(&buf[56..64], &[156, 0, 157, 0, 158, 0, 159, 0]);
-    });
+        let vec = dev.upload(&mut dfu, 4, 64).expect("vec");
+        assert_eq!(vec.len(), 64);
+        assert_eq!(vec[0..10], [128, 0, 129, 0, 130, 0, 131, 0, 132, 0]);
+        assert_eq!(vec[56..64], [156, 0, 157, 0, 158, 0, 159, 0]);
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_download_program_err_verify_and_to_idle() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 2 (offset 0) */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 2, 0, 0, 0, 128, 0],
-            Some(&[0x55; 128]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 2, &[0x55; 128]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[7, 0, 0, 0, 10, 0]); // DfuError: ErrVerify
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_ERR_VERIFY, 0, DFU_ERROR));
 
         /* Clear Status */
-        len = transact(&mut dfu, &[0x21, 0x4, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.clear_status(&mut dfu).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
-    });
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_erase_and_program() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         let blkaddr: u32 = TestMem::INITIAL_ADDRESS_POINTER;
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 0 (command), erase = blkaddr */
         let b = blkaddr.to_le_bytes();
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 0, 0, 0, 0, 5, 0],
-            Some(&[0x41, b[0], b[1], b[2], b[3]]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev
+            .download(&mut dfu, 0, &[0x41, b[0], b[1], b[2], b[3]])
+            .expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 255, 1, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, TestMem::ERASE_TIME_MS, DFU_DN_BUSY));
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Download block 2 (offset 0) */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 2, 0, 0, 0, 128, 0],
-            Some(&[0x55; 128]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 2, &[0x55; 128]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Abort */
-        len = transact(&mut dfu, &[0x21, 0x6, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.abort(&mut dfu).expect("vec");
+        assert_eq!(vec, []);
 
         /* Upload block 2 (offset 0) - must be 0x55 */
-        len = transact(&mut dfu, &[0xa1, 0x2, 2, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..128], &[0x55; 128]);
+        let vec = dev.upload(&mut dfu, 2, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec, [0x55; 128]);
 
         /* Upload block 3 (offset 1) - must be 0xff */
-        len = transact(&mut dfu, &[0xa1, 0x2, 3, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..128], &[0xff; 128]);
-    });
+        let vec = dev.upload(&mut dfu, 3, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec[0..128], [0xff; 128]);
+    })
+    .expect("with_usb");
 }
 
 #[test]
 #[should_panic(expected = "emulate device reset")]
 fn test_manifestation() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 2 (offset 0) */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 2, 0, 0, 0, 128, 0],
-            Some(&[0; 128]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 2, &[0; 128]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Download block 3 (offset 1) len 0, trigger manifestation */
-        len = transact(&mut dfu, &[0x21, 0x1, 3, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 3, &[]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 1, 0, 0, 7, 0]); // dfuManifest
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 1, DFU_MANIFEST));
 
         unreachable!("device must reset");
-    });
+    })
+    .expect("with_usb");
 }
 
 /// DFU class with manifestation call that returns
 struct MkDFUMTret {}
 
-impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUMTret {
-    fn create<'a>(&mut self, alloc: &'a UsbBusAllocator<TestBus>) -> DFUClass<TestBus, TestMem> {
+impl UsbDeviceCtx<EmulatedUsbBus, DFUClass<EmulatedUsbBus, TestMem>> for MkDFUMTret {
+    fn create_class<'a>(
+        &mut self,
+        alloc: &'a UsbBusAllocator<EmulatedUsbBus>,
+    ) -> AnyResult<DFUClass<EmulatedUsbBus, TestMem>> {
         fn manifestation(tm: &mut TestMem) -> Result<(), DFUManifestationError> {
             Ok(())
         }
@@ -909,72 +778,63 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUMTret {
             program: None,
             manifestation: Some(manifestation),
         };
-        DFUClass::new(&alloc, TestMem::new(Some(overrides)))
+        Ok(DFUClass::new(&alloc, TestMem::new(Some(overrides))))
     }
 }
 
 #[test]
 fn test_manifestation_no_reset() {
-    with_usb(&mut MkDFUMTret {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFUMTret {}, |mut dfu, mut dev| {
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 2 (offset 0) */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 2, 0, 0, 0, 128, 0],
-            Some(&[0; 128]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 2, &[0x0; 128]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Download block 3 (offset 1) len 0, trigger manifestation */
-        len = transact(&mut dfu, &[0x21, 0x1, 3, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 3, &[]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 1, 0, 0, 7, 0]); // dfuManifest
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 1, DFU_MANIFEST));
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 8, 0]); // DfuManifestWaitReset
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_MANIFEST_WAIT_RESET));
 
         /* Abort */
-        let e =
-            transact(&mut dfu, &[0x21, 0x6, 0, 0, 0, 0, 0, 0], None, &mut buf).expect_err("stall");
-        assert_eq!(e, EPErr::Stalled);
+        let e = dev.abort(&mut dfu).expect_err("stall");
+        assert_eq!(e, AnyUsbError::EP0Stalled);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 8, 0]); // DfuManifestWaitReset
-    });
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_MANIFEST_WAIT_RESET));
+    })
+    .expect("with_usb");
 }
 
 /// DFU class with manifestation call that returns
 struct MkDFUMTerr {}
 
-impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUMTerr {
-    fn create<'a>(&mut self, alloc: &'a UsbBusAllocator<TestBus>) -> DFUClass<TestBus, TestMem> {
+impl UsbDeviceCtx<EmulatedUsbBus, DFUClass<EmulatedUsbBus, TestMem>> for MkDFUMTerr {
+    fn create_class<'a>(
+        &mut self,
+        alloc: &'a UsbBusAllocator<EmulatedUsbBus>,
+    ) -> AnyResult<DFUClass<EmulatedUsbBus, TestMem>> {
         fn manifestation(tm: &mut TestMem) -> Result<(), DFUManifestationError> {
             Err(DFUManifestationError::NotDone)
         }
@@ -984,61 +844,54 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUMTerr {
             program: None,
             manifestation: Some(manifestation),
         };
-        DFUClass::new(&alloc, TestMem::new(Some(overrides)))
+        Ok(DFUClass::new(&alloc, TestMem::new(Some(overrides))))
     }
 }
 
 #[test]
 fn test_manifestation_err_not_done() {
-    with_usb(&mut MkDFUMTerr {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFUMTerr {}, |mut dfu, mut dev| {
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 2 (offset 0) */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 2, 0, 0, 0, 128, 0],
-            Some(&[0; 128]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 2, &[0; 128]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Download block 3 (offset 1) len 0, trigger manifestation */
-        len = transact(&mut dfu, &[0x21, 0x1, 3, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 3, &[]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 1, 0, 0, 7, 0]); // dfuManifest
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 1, DFU_MANIFEST));
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[9, 0, 0, 0, 10, 0]); // DfuError: ErrNotdone
-    });
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_ERR_NOTDONE, 0, DFU_ERROR));
+    })
+    .expect("with_usb");
 }
 
-struct MkDFUEraseerr {}
+struct MkDFUEraseErr {}
 
-impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUEraseerr {
-    fn create<'a>(&mut self, alloc: &'a UsbBusAllocator<TestBus>) -> DFUClass<TestBus, TestMem> {
+impl UsbDeviceCtx<EmulatedUsbBus, DFUClass<EmulatedUsbBus, TestMem>> for MkDFUEraseErr {
+    fn create_class<'a>(
+        &mut self,
+        alloc: &'a UsbBusAllocator<EmulatedUsbBus>,
+    ) -> AnyResult<DFUClass<EmulatedUsbBus, TestMem>> {
         fn erase(tm: &mut TestMem, address: u32) -> core::result::Result<(), DFUMemError> {
             Err(DFUMemError::CheckErased)
         }
@@ -1049,50 +902,44 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUEraseerr {
             program: None,
             manifestation: None,
         };
-        DFUClass::new(&alloc, TestMem::new(Some(overrides)))
+        Ok(DFUClass::new(&alloc, TestMem::new(Some(overrides))))
     }
 }
 
 #[test]
 fn test_erase_err_verfail() {
-    with_usb(&mut MkDFUEraseerr {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFUEraseErr {}, |mut dfu, mut dev| {
         let blkaddr: u32 = TestMem::INITIAL_ADDRESS_POINTER;
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 0 (command), erase = blkaddr */
         let b = blkaddr.to_le_bytes();
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 0, 0, 0, 0, 5, 0],
-            Some(&[0x41, b[0], b[1], b[2], b[3]]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev
+            .download(&mut dfu, 0, &[0x41, b[0], b[1], b[2], b[3]])
+            .expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 255, 1, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, TestMem::ERASE_TIME_MS, DFU_DN_BUSY));
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[5, 0, 0, 0, 10, 0]); // DfuError: errCheckErased
-    });
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_ERR_CHECK_ERASED, 0, DFU_ERROR));
+    })
+    .expect("with_usb");
 }
 
-struct MkDFUProgerr {}
+struct MkDFUProgErr {}
 
-impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUProgerr {
-    fn create<'a>(&mut self, alloc: &'a UsbBusAllocator<TestBus>) -> DFUClass<TestBus, TestMem> {
+impl UsbDeviceCtx<EmulatedUsbBus, DFUClass<EmulatedUsbBus, TestMem>> for MkDFUProgErr {
+    fn create_class<'a>(
+        &mut self,
+        alloc: &'a UsbBusAllocator<EmulatedUsbBus>,
+    ) -> AnyResult<DFUClass<EmulatedUsbBus, TestMem>> {
         fn program(tm: &mut TestMem, address: u32, length: usize) -> Result<(), DFUMemError> {
             if address > TestMem::INITIAL_ADDRESS_POINTER {
                 Err(DFUMemError::Write)
@@ -1107,71 +954,61 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUProgerr {
             program: Some(program),
             manifestation: None,
         };
-        DFUClass::new(&alloc, TestMem::new(Some(overrides)))
+        Ok(DFUClass::new(&alloc, TestMem::new(Some(overrides))))
     }
 }
 
 #[test]
 fn test_program_err_prog_write() {
-    with_usb(&mut MkDFUProgerr {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFUProgErr {}, |mut dfu, mut dev| {
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 2 (offset 0) */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 2, 0, 0, 0, 128, 0],
-            Some(&[0x55; 128]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 2, &[0x55; 128]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[6, 0, 0, 0, 10, 0]); // DfuError: errProg
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_ERR_PROG, 0, DFU_ERROR));
 
         /* Clear Status */
-        len = transact(&mut dfu, &[0x21, 0x4, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.clear_status(&mut dfu).expect("vec");
+        assert_eq!(vec, []);
 
         /* Download block 3 (offset 1) */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 3, 0, 0, 0, 128, 0],
-            Some(&[0x55; 128]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 3, &[0x55; 128]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[3, 0, 0, 0, 10, 0]); // DfuError: errWrite
-    });
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_ERR_WRITE, 0, DFU_ERROR));
+    })
+    .expect("with_usb");
 }
 
 struct MkDFUReadErr {}
 
-impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUReadErr {
-    fn create<'a>(&mut self, alloc: &'a UsbBusAllocator<TestBus>) -> DFUClass<TestBus, TestMem> {
+impl UsbDeviceCtx<EmulatedUsbBus, DFUClass<EmulatedUsbBus, TestMem>> for MkDFUReadErr {
+    fn create_class<'a>(
+        &mut self,
+        alloc: &'a UsbBusAllocator<EmulatedUsbBus>,
+    ) -> AnyResult<DFUClass<EmulatedUsbBus, TestMem>> {
         fn read(
             tm: &mut TestMem,
             address: u32,
@@ -1190,291 +1027,230 @@ impl ClsMaker<TestBus, DFUClass<TestBus, TestMem>> for MkDFUReadErr {
             program: None,
             manifestation: None,
         };
-        DFUClass::new(&alloc, TestMem::new(Some(overrides)))
+        Ok(DFUClass::new(&alloc, TestMem::new(Some(overrides))))
     }
 }
 
 #[test]
 fn test_read_err_addr_vend() {
-    with_usb(&mut MkDFUReadErr {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-        let mut e;
-
+    with_usb(MkDFUReadErr {}, |mut dfu, mut dev| {
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Upload block 2 (offset 0) */
-        e = transact(&mut dfu, &[0xa1, 0x2, 2, 0, 0, 0, 128, 0], None, &mut buf)
-            .expect_err("stall");
-        assert_eq!(e, EPErr::Stalled);
+        let e = dev.upload(&mut dfu, 2, 128).expect_err("stall");
+        assert_eq!(e, AnyUsbError::EP0Stalled);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[8, 0, 0, 0, 10, 0]); // DfuError: errAddress
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_ERR_ADDRESS, 0, DFU_ERROR));
 
         /* Clear Status */
-        len = transact(&mut dfu, &[0x21, 0x4, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.clear_status(&mut dfu).expect("vec");
+        assert_eq!(vec, []);
 
         /* Upload block 3 (offset 1*128) */
-        e = transact(&mut dfu, &[0xa1, 0x2, 3, 0, 0, 0, 128, 0], None, &mut buf)
-            .expect_err("stall");
-        assert_eq!(e, EPErr::Stalled);
+        let e = dev.upload(&mut dfu, 3, 128).expect_err("stall");
+        assert_eq!(e, AnyUsbError::EP0Stalled);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[11, 0, 0, 0, 10, 0]); // DfuError: ErrVendor
-    });
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_ERR_VENDOR, 0, DFU_ERROR));
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_download_program_short() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         assert!(16 < TestMem::TRANSFER_SIZE);
 
         let mut blkaddr: u32 = TestMem::INITIAL_ADDRESS_POINTER;
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Download block 0 (command), erase = blkaddr */
         let mut b = blkaddr.to_le_bytes();
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 0, 0, 0, 0, 5, 0],
-            Some(&[0x41, b[0], b[1], b[2], b[3]]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev
+            .download(&mut dfu, 0, &[0x41, b[0], b[1], b[2], b[3]])
+            .expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 255, 1, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, TestMem::ERASE_TIME_MS, DFU_DN_BUSY));
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Download block 2 (offset 0), full block of 0x55 */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 2, 0, 0, 0, 128, 0],
-            Some(&[0x55; 128]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 2, &[0x55; 128]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         blkaddr = TestMem::INITIAL_ADDRESS_POINTER + 128;
 
         /* Download block 0 (command), address pointer = blkaddr */
         b = blkaddr.to_le_bytes();
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 0, 0, 0, 0, 5, 0],
-            Some(&[0x21, b[0], b[1], b[2], b[3]]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev
+            .download(&mut dfu, 0, &[0x21, b[0], b[1], b[2], b[3]])
+            .expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DN_BUSY));
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Download block 2 (offset 0), new address, short block of 0xaa */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 2, 0, 0, 0, 16, 0],
-            Some(&[0xaa; 16]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 2, &[0xaa; 16]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         blkaddr = TestMem::INITIAL_ADDRESS_POINTER;
 
         /* Download block 0 (command), address pointer = blkaddr */
         b = blkaddr.to_le_bytes();
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 0, 0, 0, 0, 5, 0],
-            Some(&[0x21, b[0], b[1], b[2], b[3]]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev
+            .download(&mut dfu, 0, &[0x21, b[0], b[1], b[2], b[3]])
+            .expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DN_BUSY));
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Abort */
-        len = transact(&mut dfu, &[0x21, 0x6, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.abort(&mut dfu).expect("vec");
+        assert_eq!(vec, []);
 
         /* Upload block 2 (offset 0) - must be 0x55 */
-        len = transact(&mut dfu, &[0xa1, 0x2, 2, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
-        assert_eq!(&buf[0..128], &[0x55; 128]);
+        let vec = dev.upload(&mut dfu, 2, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
+        assert_eq!(vec[0..128], [0x55; 128]);
 
         /* Upload block 3 (offset 1) - must be 0xaa and 0xff */
-        len = transact(&mut dfu, &[0xa1, 0x2, 3, 0, 0, 0, 128, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 128);
+        let vec = dev.upload(&mut dfu, 3, 128).expect("vec");
+        assert_eq!(vec.len(), 128);
         let mut refblock = [0xffu8; 128];
         refblock[0..16].fill(0xaa);
-        assert_eq!(&buf[0..128], &refblock);
-    });
+        assert_eq!(vec[0..128], refblock);
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_status_err_small_buffer() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         /* Get Status, buffer is 5 bytes instead of 6 */
-        let e =
-            transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 5, 0], None, &mut buf).expect_err("stall");
-        assert_eq!(e, EPErr::Stalled);
-    });
+        let e = dev.read(&mut dfu, 3, 0, 0, 5).expect_err("stall");
+        assert_eq!(e, AnyUsbError::EP0Stalled);
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_state_err_small_buffer() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         /* Get State, buffer is 0 bytes instead of 1 */
-        let e =
-            transact(&mut dfu, &[0xa1, 0x5, 0, 0, 0, 0, 0, 0], None, &mut buf).expect_err("stall");
-        assert_eq!(e, EPErr::Stalled);
-    });
+        let e = dev.read(&mut dfu, 5, 0, 0, 0).expect_err("stall");
+        assert_eq!(e, AnyUsbError::EP0Stalled);
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_commands_err_small_buffer() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         /* Upload block 0 (get commands), 2 byte buffer */
-        let e =
-            transact(&mut dfu, &[0xa1, 0x2, 0, 0, 0, 0, 2, 0], None, &mut buf).expect_err("stall");
-        assert_eq!(e, EPErr::Stalled);
-    });
+        let e = dev.upload(&mut dfu, 0, 2).expect_err("stall");
+        assert_eq!(e, AnyUsbError::EP0Stalled);
+    })
+    .expect("with_usb");
 }
 
 #[test]
 fn test_err_addr_overflow() {
-    with_usb(&mut MkDFU {}, |mut dfu, transact| {
-        let mut buf = [0u8; 256];
-        let mut len;
-
+    with_usb(MkDFU {}, |mut dfu, mut dev| {
         let invalid_addr: u32 = 0xffff_fff0;
 
         /* Download block 0 (command), address pointer = invalid_addr */
         let b = invalid_addr.to_le_bytes();
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 0, 0, 0, 0, 5, 0],
-            Some(&[0x21, b[0], b[1], b[2], b[3]]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev
+            .download(&mut dfu, 0, &[0x21, b[0], b[1], b[2], b[3]])
+            .expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DN_BUSY));
         assert_eq!(dfu.get_address_pointer(), invalid_addr);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 5, 0]); // dfuDnloadIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_DNLOAD_IDLE));
 
         /* Download block 3 (offset 1), real start address 0x1_0000_0070 */
-        len = transact(
-            &mut dfu,
-            &[0x21, 0x1, 3, 0, 0, 0, 128, 0],
-            Some(&[0x55; 128]),
-            &mut buf,
-        )
-        .expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.download(&mut dfu, 3, &[0x55; 128]).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 50, 0, 0, 4, 0]); // dfuDnBusy
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(
+            vec,
+            status(STATUS_OK, TestMem::PROGRAM_TIME_MS, DFU_DN_BUSY)
+        );
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[8, 0, 0, 0, 10, 0]); // DfuError: ErrAddress
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_ERR_ADDRESS, 0, DFU_ERROR));
 
         /* Clear Status */
-        len = transact(&mut dfu, &[0x21, 0x4, 0, 0, 0, 0, 0, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 0);
+        let vec = dev.clear_status(&mut dfu).expect("vec");
+        assert_eq!(vec, []);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[0, 0, 0, 0, 2, 0]); // dfuIdle
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_OK, 0, DFU_IDLE));
 
         /* Upload block 3 (offset 1) - real start address 0x1_0000_0070 */
-        let e = transact(&mut dfu, &[0xa1, 0x2, 3, 0, 0, 0, 128, 0], None, &mut buf)
-            .expect_err("stall");
-        assert_eq!(e, EPErr::Stalled);
+        let e = dev.upload(&mut dfu, 3, 128).expect_err("stall");
+        assert_eq!(e, AnyUsbError::EP0Stalled);
 
         /* Get Status */
-        len = transact(&mut dfu, &[0xa1, 0x3, 0, 0, 0, 0, 6, 0], None, &mut buf).expect("len");
-        assert_eq!(len, 6);
-        assert_eq!(&buf[0..6], &[8, 0, 0, 0, 10, 0]); // DfuError: ErrAddress
-    });
+        let vec = dev.get_status(&mut dfu).expect("vec");
+        assert_eq!(vec, status(STATUS_ERR_ADDRESS, 0, DFU_ERROR));
+    })
+    .expect("with_usb");
 }
