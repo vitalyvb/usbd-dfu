@@ -1,7 +1,7 @@
 [package]
 name = "usbd-dfu"
 description = "DFU protocol for a `usb-device` device."
-version = "0.4.0"
+version = "0.4.1"
 authors = ["Vitalii Bursov <vitaly@bursov.com>"]
 edition = "2021"
 readme = "README.md"
@@ -14,3 +14,6 @@ exclude = [
 
 [dependencies.usb-device]
 version = "0.3.2"
+
+[dev-dependencies.usbd-class-tester]
+version = "0.1.0"
