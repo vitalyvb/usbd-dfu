@@ -60,71 +60,70 @@ impl DFUMemIO for TestMem {
 /// Default DFU class factory
 struct MkDFU {}
 
-impl UsbDeviceCtx<EmulatedUsbBus, DFUClass<EmulatedUsbBus, TestMem>> for MkDFU {
+impl UsbDeviceCtx for MkDFU {
+    type C<'c> = DFUClass<EmulatedUsbBus, TestMem>;
+    const EP0_SIZE: u8 = 32;
+
     fn create_class<'a>(
         &mut self,
         alloc: &'a UsbBusAllocator<EmulatedUsbBus>,
     ) -> AnyResult<DFUClass<EmulatedUsbBus, TestMem>> {
         Ok(DFUClass::new(&alloc, TestMem::new()))
     }
-
-    // fn poll(&mut self, dfu:&mut DFUClass<TestBus, TestMem>) {
-    //     if dfu.update_pending() {
-    //         dfu.update();
-    //     }
-    // }
 }
 
 #[test]
 fn test_manifestation() {
-    with_usb(MkDFU {}, |mut dfu, mut dev| {
-        let mut vec: Vec<u8>;
+    MkDFU {}
+        .with_usb(|mut dfu, mut dev| {
+            let mut vec: Vec<u8>;
 
-        /* Get Status */
-        vec = dev.get_status(&mut dfu).expect("vec");
-        assert_eq!(&vec[..], &status(STATUS_OK, 0, DFU_IDLE));
+            /* Get Status */
+            vec = dev.get_status(&mut dfu).expect("vec");
+            assert_eq!(&vec[..], &status(STATUS_OK, 0, DFU_IDLE));
 
-        /* Download block 3 (offset 1) len 0, trigger manifestation */
-        vec = dev.download(&mut dfu, 3, &[]).expect("vec");
-        assert_eq!(&vec[..], &[]);
+            /* Download block 3 (offset 1) len 0, trigger manifestation */
+            vec = dev.download(&mut dfu, 3, &[]).expect("vec");
+            assert_eq!(&vec[..], &[]);
 
-        /* Get State */
-        vec = dev.get_state(&mut dfu).expect("vec");
-        assert_eq!(&vec[..], &[DFU_MANIFEST_SYNC]);
+            /* Get State */
+            vec = dev.get_state(&mut dfu).expect("vec");
+            assert_eq!(&vec[..], &[DFU_MANIFEST_SYNC]);
 
-        /* Get Status */
-        vec = dev.get_status(&mut dfu).expect("vec");
-        assert_eq!(&vec[..], &status(STATUS_OK, 0x123, DFU_MANIFEST));
+            /* Get Status */
+            vec = dev.get_status(&mut dfu).expect("vec");
+            assert_eq!(&vec[..], &status(STATUS_OK, 0x123, DFU_MANIFEST));
 
-        /* Get State */
-        vec = dev.get_state(&mut dfu).expect("vec");
-        assert_eq!(&vec[..], &[DFU_MANIFEST_SYNC]);
+            /* Get State */
+            vec = dev.get_state(&mut dfu).expect("vec");
+            assert_eq!(&vec[..], &[DFU_MANIFEST_SYNC]);
 
-        /* Get Status */
-        vec = dev.get_status(&mut dfu).expect("vec");
-        assert_eq!(&vec[..], &status(STATUS_OK, 0, DFU_IDLE));
-    })
-    .expect("with_usb");
+            /* Get Status */
+            vec = dev.get_status(&mut dfu).expect("vec");
+            assert_eq!(&vec[..], &status(STATUS_OK, 0, DFU_IDLE));
+        })
+        .expect("with_usb");
 }
 
 #[test]
 fn test_err_por() {
-    with_usb(MkDFU {}, |mut dfu, mut dev| {
-        let mut vec: Vec<u8>;
+    MkDFU {}
+        .with_usb(|mut dfu, mut dev| {
+            let mut vec: Vec<u8>;
 
-        dfu.set_unexpected_reset_state();
+            dfu.set_unexpected_reset_state();
 
-        /* Get Status */
-        vec = dev.get_status(&mut dfu).expect("vec");
-        assert_eq!(&vec[..], &status(STATUS_ERR_POR, 0, DFU_ERROR));
+            /* Get Status */
+            vec = dev.get_status(&mut dfu).expect("vec");
+            assert_eq!(&vec[..], &status(STATUS_ERR_POR, 0, DFU_ERROR));
 
-        /* Clear Status */
-        vec = dev.clear_status(&mut dfu).expect("vec");
-        assert_eq!(&vec[..], &[]);
+            /* Clear Status */
+            vec = dev.clear_status(&mut dfu).expect("vec");
+            assert_eq!(&vec[..], &[]);
 
-        /* Get Status */
-        vec = dev.get_status(&mut dfu).expect("vec");
-        assert_eq!(&vec[..], &status(STATUS_OK, 0, DFU_IDLE));
-    })
-    .expect("with_usb");
+            /* Get Status */
+            vec = dev.get_status(&mut dfu).expect("vec");
+            assert_eq!(&vec[..], &status(STATUS_OK, 0, DFU_IDLE));
+        })
+        .expect("with_usb");
 }
