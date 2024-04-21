@@ -32,101 +32,69 @@ pub const STATUS_ERR_POR: u8 = 0x0D;
 pub const STATUS_ERR_UNKNOWN: u8 = 0x0E;
 pub const STATUS_ERR_STALLED_PKT: u8 = 0x0F;
 
-pub trait HostExt<T> {
-    fn upload(
-        &mut self,
-        cls: &mut T,
-        block_num: u16,
-        length: usize,
-    ) -> core::result::Result<Vec<u8>, AnyUsbError>;
-    fn ioop_raw(
-        &mut self,
-        cls: &mut T,
-        reqt: CtrRequestType,
-        req: u8,
-        value: u16,
-        index: u16,
-        length: u16,
-        data: Option<&[u8]>,
-    ) -> core::result::Result<Vec<u8>, AnyUsbError>;
-    fn ioop(
-        &mut self,
-        cls: &mut T,
-        reqt: CtrRequestType,
-        req: u8,
-        value: u16,
-        index: u16,
-        length: u16,
-        data: Option<&[u8]>,
-    ) -> core::result::Result<Vec<u8>, AnyUsbError>;
+pub trait DeviceExt<C> {
+    fn upload(&mut self, cls: &mut C, block_num: u16, length: usize) -> AnyResult<Vec<u8>>;
 
     fn read(
         &mut self,
-        cls: &mut T,
+        cls: &mut C,
         req: u8,
         value: u16,
         index: u16,
         length: u16,
-    ) -> core::result::Result<Vec<u8>, AnyUsbError>;
+    ) -> AnyResult<Vec<u8>>;
     fn write(
         &mut self,
-        cls: &mut T,
+        cls: &mut C,
         req: u8,
         value: u16,
         index: u16,
         length: u16,
         data: &[u8],
-    ) -> core::result::Result<Vec<u8>, AnyUsbError>;
+    ) -> AnyResult<Vec<u8>>;
 
-    fn download(
-        &mut self,
-        cls: &mut T,
-        block_num: u16,
-        data: &[u8],
-    ) -> core::result::Result<Vec<u8>, AnyUsbError>;
-    fn get_status(&mut self, cls: &mut T) -> core::result::Result<Vec<u8>, AnyUsbError>;
-    fn clear_status(&mut self, cls: &mut T) -> core::result::Result<Vec<u8>, AnyUsbError>;
-    fn get_state(&mut self, cls: &mut T) -> core::result::Result<Vec<u8>, AnyUsbError>;
-    fn abort(&mut self, cls: &mut T) -> core::result::Result<Vec<u8>, AnyUsbError>;
+    fn download(&mut self, cls: &mut C, block_num: u16, data: &[u8]) -> AnyResult<Vec<u8>>;
+    fn get_status(&mut self, cls: &mut C) -> AnyResult<Vec<u8>>;
+    fn clear_status(&mut self, cls: &mut C) -> AnyResult<Vec<u8>>;
+    fn get_state(&mut self, cls: &mut C) -> AnyResult<Vec<u8>>;
+    fn abort(&mut self, cls: &mut C) -> AnyResult<Vec<u8>>;
 }
 
-impl<'a, T, M> HostExt<T> for Device<'a, T, M>
+impl<'a, C, M> DeviceExt<C> for Device<'a, C, M>
 where
-    T: UsbClass<EmulatedUsbBus>,
-    M: UsbDeviceCtx<EmulatedUsbBus, T>,
+    C: UsbClass<EmulatedUsbBus>,
+    M: UsbDeviceCtx<C<'a> = C>,
 {
-    fn ioop_raw(
+    fn read(
         &mut self,
-        cls: &mut T,
-        reqt: CtrRequestType,
+        cls: &mut C,
         req: u8,
         value: u16,
         index: u16,
         length: u16,
-        data: Option<&[u8]>,
-    ) -> core::result::Result<Vec<u8>, AnyUsbError> {
-        let mut buf: Vec<u8> = vec![0; length as usize];
-
-        let setup = SetupPacket::new(reqt, req, value, index, length);
-
-        let len = self.ep0(cls, setup, data, buf.as_mut_slice())?;
-        buf.truncate(len);
-        Ok(buf)
+    ) -> AnyResult<Vec<u8>> {
+        self.control_read(
+            cls,
+            CtrRequestType::to_host().class().interface(),
+            req,
+            value,
+            index,
+            length,
+        )
     }
 
-    fn ioop(
+    fn write(
         &mut self,
-        cls: &mut T,
-        reqt: CtrRequestType,
+        cls: &mut C,
         req: u8,
         value: u16,
         index: u16,
         length: u16,
-        data: Option<&[u8]>,
-    ) -> core::result::Result<Vec<u8>, AnyUsbError> {
-        self.ioop_raw(
+        data: &[u8],
+    ) -> AnyResult<Vec<u8>> {
+        self.control_write(
             cls,
-            reqt.class().interface(),
+            CtrRequestType::to_device().class().interface(),
             req,
             value,
             index,
@@ -135,82 +103,33 @@ where
         )
     }
 
-    fn read(
-        &mut self,
-        cls: &mut T,
-        req: u8,
-        value: u16,
-        index: u16,
-        length: u16,
-    ) -> core::result::Result<Vec<u8>, AnyUsbError> {
-        self.ioop(
-            cls,
-            CtrRequestType::to_host(),
-            req,
-            value,
-            index,
-            length,
-            None,
-        )
-    }
-
-    fn write(
-        &mut self,
-        cls: &mut T,
-        req: u8,
-        value: u16,
-        index: u16,
-        length: u16,
-        data: &[u8],
-    ) -> core::result::Result<Vec<u8>, AnyUsbError> {
-        self.ioop(
-            cls,
-            CtrRequestType::to_device(),
-            req,
-            value,
-            index,
-            length,
-            if data.len() > 0 { Some(data) } else { None },
-        )
-    }
-
-    fn download(
-        &mut self,
-        cls: &mut T,
-        block_num: u16,
-        data: &[u8],
-    ) -> core::result::Result<Vec<u8>, AnyUsbError> {
+    fn download(&mut self, cls: &mut C, block_num: u16, data: &[u8]) -> AnyResult<Vec<u8>> {
         if data.len() > u16::MAX as usize {
             return Err(AnyUsbError::DataConversion);
         }
         self.write(cls, 0x1, block_num, 0, data.len() as u16, data)
     }
 
-    fn upload(
-        &mut self,
-        cls: &mut T,
-        block_num: u16,
-        length: usize,
-    ) -> core::result::Result<Vec<u8>, AnyUsbError> {
+    fn upload(&mut self, cls: &mut C, block_num: u16, length: usize) -> AnyResult<Vec<u8>> {
         if length > u16::MAX as usize {
             return Err(AnyUsbError::DataConversion);
         }
         self.read(cls, 0x2, block_num, 0, length as u16)
     }
 
-    fn get_status(&mut self, cls: &mut T) -> core::result::Result<Vec<u8>, AnyUsbError> {
+    fn get_status(&mut self, cls: &mut C) -> AnyResult<Vec<u8>> {
         self.read(cls, 0x3, 0, 0, 6)
     }
 
-    fn clear_status(&mut self, cls: &mut T) -> core::result::Result<Vec<u8>, AnyUsbError> {
+    fn clear_status(&mut self, cls: &mut C) -> AnyResult<Vec<u8>> {
         self.write(cls, 0x4, 0, 0, 0, &[])
     }
 
-    fn get_state(&mut self, cls: &mut T) -> core::result::Result<Vec<u8>, AnyUsbError> {
+    fn get_state(&mut self, cls: &mut C) -> AnyResult<Vec<u8>> {
         self.read(cls, 0x5, 0, 0, 1)
     }
 
-    fn abort(&mut self, cls: &mut T) -> core::result::Result<Vec<u8>, AnyUsbError> {
+    fn abort(&mut self, cls: &mut C) -> AnyResult<Vec<u8>> {
         self.write(cls, 0x6, 0, 0, 0, &[])
     }
 }
